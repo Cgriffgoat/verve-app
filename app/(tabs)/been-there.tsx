@@ -8,13 +8,18 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  Linking,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
+import { fetchBlockedUsers, unblockUser, type BlockedUser } from '../../lib/moderation';
+import { deleteAllUserContent, requestAccountDeletion } from '../../lib/account';
 
 const CORAL = '#FF5C5C';
+const SUPPORT_EMAIL = 'cgplayworks@gmail.com';
 
 type HistoryRow = {
   id: string;
@@ -55,19 +60,76 @@ export default function BeenThereScreen() {
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
+  const [unblockingId, setUnblockingId] = useState<string | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const fetchHistory = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    setUserId(user.id);
+    setEmail(user.email ?? null);
 
-    const { data } = await supabase
-      .from('reviews')
-      .select('id, activity_id, score, review_text, photos, created_at, activities(title, category, photo_url)')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+    const [{ data }, blocked] = await Promise.all([
+      supabase
+        .from('reviews')
+        .select('id, activity_id, score, review_text, photos, created_at, activities(title, category, photo_url)')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false }),
+      fetchBlockedUsers(user.id),
+    ]);
 
     setRows((data ?? []) as unknown as HistoryRow[]);
+    setBlockedUsers(blocked);
   }, []);
+
+  const handleUnblock = useCallback(async (blocked: BlockedUser) => {
+    if (!userId) return;
+    setUnblockingId(blocked.blocked_id);
+    try {
+      await unblockUser(userId, blocked.blocked_id);
+      setBlockedUsers(prev => prev.filter(b => b.blocked_id !== blocked.blocked_id));
+    } catch (e: any) {
+      Alert.alert('Could not unblock', e.message ?? 'Please try again.');
+    } finally {
+      setUnblockingId(null);
+    }
+  }, [userId]);
+
+  const handleSignOut = useCallback(() => {
+    Alert.alert('Sign out?', undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign out', style: 'destructive', onPress: () => { supabase.auth.signOut(); } },
+    ]);
+  }, []);
+
+  const handleDeleteAccount = useCallback(() => {
+    if (!userId) return;
+    Alert.alert(
+      'Delete your account?',
+      "This permanently removes your reviews, saved places, boards, and hangout activity. This can't be undone.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: async () => {
+            setDeletingAccount(true);
+            try {
+              await deleteAllUserContent(userId);
+              await requestAccountDeletion(userId, email);
+              await supabase.auth.signOut();
+            } catch (e: any) {
+              Alert.alert('Something went wrong', e.message ?? 'Please try again or contact support.');
+              setDeletingAccount(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [userId, email]);
 
   useFocusEffect(
     useCallback(() => {
@@ -172,6 +234,64 @@ export default function BeenThereScreen() {
             })}
           </View>
         )}
+
+        {/* ── Privacy & Safety ── */}
+        <View style={styles.safetySection}>
+          <Text style={styles.safetyHeader}>Privacy & Safety</Text>
+
+          {blockedUsers.length > 0 && (
+            <View style={styles.blockedCard}>
+              <Text style={styles.blockedCardTitle}>Blocked users</Text>
+              {blockedUsers.map(b => (
+                <View key={b.id} style={styles.blockedRow}>
+                  <Text style={styles.blockedName} numberOfLines={1}>
+                    {b.blocked_display_name ?? 'Verve User'}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => handleUnblock(b)}
+                    disabled={unblockingId === b.blocked_id}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    {unblockingId === b.blocked_id
+                      ? <ActivityIndicator size="small" color={CORAL} />
+                      : <Text style={styles.unblockText}>Unblock</Text>
+                    }
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={styles.contactRow}
+            onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=Verve%20support`)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.contactRowText}>Contact support / report a problem</Text>
+            <Text style={styles.contactRowChevron}>›</Text>
+          </TouchableOpacity>
+          <Text style={styles.contactEmail}>{SUPPORT_EMAIL}</Text>
+        </View>
+
+        {/* ── Account ── */}
+        <View style={styles.safetySection}>
+          <Text style={styles.safetyHeader}>Account</Text>
+          <TouchableOpacity style={styles.contactRow} onPress={handleSignOut} activeOpacity={0.7}>
+            <Text style={styles.contactRowText}>Sign out</Text>
+            <Text style={styles.contactRowChevron}>›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.deleteAccountBtn}
+            onPress={handleDeleteAccount}
+            disabled={deletingAccount}
+            activeOpacity={0.7}
+          >
+            {deletingAccount
+              ? <ActivityIndicator size="small" color={CORAL} />
+              : <Text style={styles.deleteAccountText}>Delete account</Text>
+            }
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -330,5 +450,90 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: -0.5,
+  },
+
+  // Privacy & Safety
+  safetySection: {
+    paddingHorizontal: 20,
+    marginTop: 28,
+    gap: 10,
+  },
+  safetyHeader: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#8E8E93',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  blockedCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  blockedCardTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  blockedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  blockedName: {
+    fontSize: 14,
+    color: '#1A1A1A',
+    fontWeight: '500',
+    flex: 1,
+  },
+  unblockText: {
+    fontSize: 13,
+    color: CORAL,
+    fontWeight: '700',
+  },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  contactRowText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1A1A1A',
+  },
+  contactRowChevron: {
+    fontSize: 18,
+    color: '#C7C7CC',
+  },
+  contactEmail: {
+    fontSize: 12,
+    color: '#BDBDBD',
+    textAlign: 'center',
+  },
+  deleteAccountBtn: {
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  deleteAccountText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: CORAL,
   },
 });

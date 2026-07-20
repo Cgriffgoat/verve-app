@@ -25,9 +25,12 @@ export type Vote = {
   id: string;
   hangout_id: string;
   user_id: string;
-  vibe: string | null;    // stores feel value: 'food' | 'outdoors' | 'games' | 'arts'
-  setting: string | null;
-  budget: string | null;  // stores time value: 'quick' | 'medium' | 'long'
+  vibe: string | null;         // feel: 'food' | 'outdoors' | 'games' | 'arts'
+  setting: string | null;      // time of day
+  budget: string | null;       // duration: 'quick' | 'couple' | 'half_day' | 'all_day'
+  price: string | null;        // '$' | '$$' | '$$$'
+  dog_friendly: string | null; // 'yes' | 'no'
+  live_music: string | null;   // 'yes' | 'no'
 };
 
 export type Suggestion = {
@@ -119,10 +122,12 @@ export async function joinHangout(
   return data as Hangout;
 }
 
+export type VoteField = 'vibe' | 'setting' | 'budget' | 'price' | 'dog_friendly' | 'live_music';
+
 export async function castVote(
   hangoutId: string,
   userId: string,
-  field: 'vibe' | 'setting' | 'budget',
+  field: VoteField,
   value: string,
 ): Promise<void> {
   await supabase.from('hangout_votes').upsert(
@@ -164,6 +169,16 @@ export async function decideActivity(
   const { error } = await supabase
     .from('hangouts')
     .update({ status: 'decided', selected_activity_id: activityId })
+    .eq('id', hangoutId);
+  if (error) throw error;
+}
+
+// Reopens voting after a "We're going here!" decision — for when someone
+// locked in too eagerly and the group wants to keep looking.
+export async function undecideActivity(hangoutId: string): Promise<void> {
+  const { error } = await supabase
+    .from('hangouts')
+    .update({ status: 'voting', selected_activity_id: null })
     .eq('id', hangoutId);
   if (error) throw error;
 }

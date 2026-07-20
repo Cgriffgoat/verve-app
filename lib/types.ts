@@ -9,6 +9,9 @@ export type Activity = {
   commitment: string;
   weather?: string;
   good_for?: string[];
+  priceLevel?: '$' | '$$' | '$$$' | null;
+  allowsDogs?: boolean | null;
+  hasLiveMusic?: boolean | null;
 };
 
 export type Review = {

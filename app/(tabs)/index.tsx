@@ -110,6 +110,9 @@ export default function TodayScreen() {
           commitment: row.commitment,
           weather: row.weather ?? undefined,
           good_for: row.good_for ?? [],
+          priceLevel: row.price_level ?? null,
+          allowsDogs: row.allows_dogs ?? null,
+          hasLiveMusic: row.has_live_music ?? null,
         })),
       );
     }

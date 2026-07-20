@@ -6,9 +6,24 @@ create table if not exists public.hangout_messages (
   hangout_id  uuid        not null references public.hangouts(id) on delete cascade,
   user_id     uuid        not null references auth.users(id) on delete cascade,
   display_name text       not null,
-  body        text        not null check (char_length(body) > 0 and char_length(body) <= 1000),
+  content     text        not null check (char_length(content) > 0 and char_length(content) <= 1000),
   created_at  timestamptz not null default now()
 );
+
+-- Fixes an earlier version of this script that named the column "body";
+-- the app code (lib/hangouts.ts) reads/writes "content".
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'hangout_messages' and column_name = 'body'
+  ) and not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'hangout_messages' and column_name = 'content'
+  ) then
+    alter table public.hangout_messages rename column body to content;
+  end if;
+end $$;
 
 alter table public.hangout_messages enable row level security;
 

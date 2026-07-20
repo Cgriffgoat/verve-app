@@ -46,9 +46,14 @@ export function ActivityCard({ activity, onPress, isSaved = false, onToggleSave 
   const router = useRouter();
   const [imgErr, setImgErr] = useState(false);
   const showPlaceholder = !activity.imageUrl || imgErr;
-  const tags = [activity.distance, activity.commitment, activity.weather].filter(
-    (t): t is string => Boolean(t),
-  );
+  const tags = [
+    activity.distance,
+    activity.commitment,
+    activity.weather,
+    activity.priceLevel,
+    activity.allowsDogs ? '🐶 Dog friendly' : null,
+    activity.hasLiveMusic ? '🎵 Live music' : null,
+  ].filter((t): t is string => Boolean(t));
 
   return (
     <TouchableOpacity

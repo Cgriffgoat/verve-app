@@ -18,9 +18,10 @@ interface Props {
   isOwnReview: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
+  onReport?: () => void;
 }
 
-export function ReviewCard({ review, isOwnReview, onEdit, onDelete }: Props) {
+export function ReviewCard({ review, isOwnReview, onEdit, onDelete, onReport }: Props) {
   const [helpfulCount, setHelpfulCount] = useState(review.helpful_count);
   const [liked, setLiked] = useState(false);
 
@@ -114,11 +115,21 @@ export function ReviewCard({ review, isOwnReview, onEdit, onDelete }: Props) {
             </TouchableOpacity>
           </View>
         ) : (
-          <TouchableOpacity onPress={handleHelpful} activeOpacity={0.7}>
-            <Text style={[styles.helpfulBtn, liked && styles.helpfulBtnActive]}>
-              👍 Helpful{helpfulCount > 0 ? ` (${helpfulCount})` : ''}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.otherActions}>
+            <TouchableOpacity onPress={handleHelpful} activeOpacity={0.7}>
+              <Text style={[styles.helpfulBtn, liked && styles.helpfulBtnActive]}>
+                👍 Helpful{helpfulCount > 0 ? ` (${helpfulCount})` : ''}
+              </Text>
+            </TouchableOpacity>
+            {onReport && (
+              <>
+                <Text style={styles.actionDivider}>·</Text>
+                <TouchableOpacity onPress={onReport} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Text style={styles.reportBtn}>Report</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         )}
       </View>
     </View>
@@ -233,6 +244,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  otherActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  reportBtn: {
+    fontSize: 13,
+    color: '#8E8E93',
+    fontWeight: '500',
   },
   editBtn: {
     fontSize: 13,

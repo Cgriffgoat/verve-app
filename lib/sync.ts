@@ -6,6 +6,7 @@ const PLACES_NEW = 'https://places.googleapis.com/v1';
 const TMDB_IMG   = 'https://image.tmdb.org/t/p/w500';
 
 // searchText returns nextPageToken at the top level, not nested under places
+// allowsDogs/liveMusic are Enterprise+Atmosphere-tier fields — pricier than the rest of this mask.
 const TEXT_FIELD_MASK = [
   'nextPageToken',
   'places.id',
@@ -16,6 +17,8 @@ const TEXT_FIELD_MASK = [
   'places.photos',
   'places.priceLevel',
   'places.shortFormattedAddress',
+  'places.allowsDogs',
+  'places.liveMusic',
 ].join(',');
 
 type ActivityRow = {
@@ -31,6 +34,9 @@ type ActivityRow = {
   latitude: number;
   longitude: number;
   good_for: string[];
+  price_level: string | null;
+  allows_dogs: boolean | null;
+  has_live_music: boolean | null;
 };
 
 const CATEGORY_GOOD_FOR: Record<string, string[]> = {
@@ -82,6 +88,8 @@ const NEARBY_FIELD_MASK = [
   'places.photos',
   'places.priceLevel',
   'places.shortFormattedAddress',
+  'places.allowsDogs',
+  'places.liveMusic',
 ].join(',');
 
 async function searchNearby(
@@ -119,6 +127,18 @@ function priceLevelStr(level: string | undefined): string {
     PRICE_LEVEL_VERY_EXPENSIVE: '$$$$',
   };
   return level ? (map[level] ?? '') : '';
+}
+
+// Collapses Google's 5-level price enum into the 3 buckets hangout voting uses.
+function priceBucket(level: string | undefined): '$' | '$$' | '$$$' | null {
+  switch (level) {
+    case 'PRICE_LEVEL_FREE':
+    case 'PRICE_LEVEL_INEXPENSIVE': return '$';
+    case 'PRICE_LEVEL_MODERATE': return '$$';
+    case 'PRICE_LEVEL_EXPENSIVE':
+    case 'PRICE_LEVEL_VERY_EXPENSIVE': return '$$$';
+    default: return null;
+  }
 }
 
 // Paginated searchText — deduplicates by place id, up to 60 results (3 pages × 20)
@@ -225,6 +245,9 @@ async function syncMovies(lat: number, lng: number): Promise<void> {
     latitude: tLat,
     longitude: tLng,
     good_for: CATEGORY_GOOD_FOR['Movies'],
+    price_level: null,
+    allows_dogs: null,
+    has_live_music: null,
   }));
 
   await upsert(rows, false);
@@ -272,22 +295,19 @@ const VENUE_TYPES: Array<{ placeType: string; category: string; commitment: stri
   { placeType: 'gym',                category: 'Wellness',          commitment: '1-2 hrs' },
   { placeType: 'fitness_center',     category: 'Wellness',          commitment: '1-2 hrs' },
   { placeType: 'sports_complex',     category: 'Wellness',          commitment: '1-3 hrs' },
-  { placeType: 'climbing_gym',       category: 'Wellness',          commitment: '1-3 hrs' },
   // Events
   { placeType: 'tourist_attraction', category: 'Events',            commitment: '1-3 hrs' },
   { placeType: 'stadium',            category: 'Events',            commitment: '2-4 hrs' },
   // Adventure/Thrill
   { placeType: 'amusement_center',      category: 'Adventure/Thrill', commitment: '1-3 hrs' },
   { placeType: 'amusement_park',        category: 'Adventure/Thrill', commitment: '3-6 hrs' },
-  { placeType: 'go_kart_track',         category: 'Adventure/Thrill', commitment: '1-2 hrs' },
-  { placeType: 'escape_room',           category: 'Adventure/Thrill', commitment: '1-2 hrs' },
+  { placeType: 'go_karting_venue',      category: 'Adventure/Thrill', commitment: '1-2 hrs' },
   { placeType: 'miniature_golf_course', category: 'Adventure/Thrill', commitment: '1-2 hrs' },
   // Games & Hobbies
   { placeType: 'bowling_alley',      category: 'Games & Hobbies',   commitment: '2-3 hrs' },
   // Family Fun
   { placeType: 'zoo',                category: 'Family Fun',        commitment: '2-4 hrs' },
   { placeType: 'aquarium',           category: 'Family Fun',        commitment: '1-3 hrs' },
-  { placeType: 'trampoline_park',    category: 'Family Fun',        commitment: '1-2 hrs' },
   { placeType: 'water_park',         category: 'Family Fun',        commitment: '3-5 hrs' },
   { placeType: 'playground',         category: 'Family Fun',        commitment: '30 min-2 hrs' },
 ];
@@ -320,15 +340,23 @@ function placesToRows(
       latitude: pLat,
       longitude: pLng,
       good_for: CATEGORY_GOOD_FOR[category] ?? [],
+      price_level: priceBucket(p.priceLevel),
+      allows_dogs: typeof p.allowsDogs === 'boolean' ? p.allowsDogs : null,
+      has_live_music: typeof p.liveMusic === 'boolean' ? p.liveMusic : null,
     };
   });
 }
+
+// Matches the Today feed's 25-mile query radius (Places API caps circle radius at 50000m,
+// so this fits comfortably). Previously 10km, which left niche categories (parks, escape
+// rooms, amusement parks, etc.) unsynced anywhere the nearest one was more than ~6 miles out.
+const VENUE_SYNC_RADIUS_METERS = 25 * 1609.34;
 
 async function syncVenues(lat: number, lng: number): Promise<void> {
   if (!PLACES_KEY) return;
   await Promise.all(
     VENUE_TYPES.map(({ placeType, category, commitment }) =>
-      searchNearby(lat, lng, [placeType], 10000)
+      searchNearby(lat, lng, [placeType], VENUE_SYNC_RADIUS_METERS)
         .then(places => upsert(placesToRows(places, lat, lng, category, commitment)))
         .catch(e => console.warn(`[sync] ${placeType}:`, e.message)),
     ),

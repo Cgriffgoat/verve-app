@@ -22,14 +22,18 @@ import { supabase } from '../../lib/supabase';
 import {
   castVote,
   decideActivity,
+  undecideActivity,
   sendMessage,
   type Hangout,
   type HangoutMessage,
   type Participant,
   type Vote,
+  type VoteField,
 } from '../../lib/hangouts';
 import { ActivityCard } from '../../components/ActivityCard';
+import { ReportModal } from '../../components/ReportModal';
 import { syncActivities } from '../../lib/sync';
+import { fetchBlockedUserIds } from '../../lib/moderation';
 import type { Activity } from '../../lib/types';
 
 if (Platform.OS === 'android') {
@@ -96,9 +100,12 @@ function plurality<T extends string>(arr: (T | null | undefined)[]): T | null {
 function filterActivities(base: Activity[], votes: Vote[]): Activity[] {
   if (votes.length === 0 || base.length === 0) return base;
 
-  const winFeel = plurality(votes.map(v => v.vibe));    // feel stored in vibe column
-  const winTime = plurality(votes.map(v => v.budget));   // duration stored in budget column
-  const winTOD  = plurality(votes.map(v => v.setting)); // time-of-day stored in setting column
+  const winFeel  = plurality(votes.map(v => v.vibe));         // feel
+  const winTime  = plurality(votes.map(v => v.budget));       // duration (column name predates the price vote)
+  const winTOD   = plurality(votes.map(v => v.setting));      // time-of-day
+  const winPrice = plurality(votes.map(v => v.price));        // '$' | '$$' | '$$$'
+  const winDog   = plurality(votes.map(v => v.dog_friendly)); // 'yes' | 'no'
+  const winMusic = plurality(votes.map(v => v.live_music));   // 'yes' | 'no'
 
   let result = base;
 
@@ -114,15 +121,35 @@ function filterActivities(base: Activity[], votes: Vote[]): Activity[] {
     if (f.length >= MIN_VISIBLE) result = f;
   }
 
-  // 3. Duration filter: numeric comparison on max hours
+  // 3. Duration filter: numeric comparison on max hours. Buckets are clean, non-overlapping
+  // cuts over the discrete max-hour values in COMMITMENT_MAX_HRS (1/2/3/4/5/6).
   if (winTime) {
     const f = result.filter(a => {
       const h = commitmentMaxHrs(a.commitment);
-      if (winTime === 'quick')  return h <= 2;
-      if (winTime === 'medium') return h >= 1 && h <= 4;
-      if (winTime === 'long')   return h >= 3;
+      if (winTime === 'quick')    return h <= 1;
+      if (winTime === 'couple')   return h > 1 && h <= 3;
+      if (winTime === 'half_day') return h > 3 && h <= 6;
+      if (winTime === 'all_day')  return h > 6;
       return true;
     });
+    if (f.length >= MIN_VISIBLE) result = f;
+  }
+
+  // 4. Price filter: exact bucket match
+  if (winPrice) {
+    const f = result.filter(a => a.priceLevel === winPrice);
+    if (f.length >= MIN_VISIBLE) result = f;
+  }
+
+  // 5. Dog-friendly: a requirement, not a partition — only restricts when the group asked for it
+  if (winDog === 'yes') {
+    const f = result.filter(a => a.allowsDogs === true);
+    if (f.length >= MIN_VISIBLE) result = f;
+  }
+
+  // 6. Live music: same shape as the dog-friendly requirement
+  if (winMusic === 'yes') {
+    const f = result.filter(a => a.hasLiveMusic === true);
     if (f.length >= MIN_VISIBLE) result = f;
   }
 
@@ -140,6 +167,9 @@ function rowToActivity(row: any): Activity {
     distance: row.distance,
     commitment: row.commitment,
     good_for: row.good_for ?? [],
+    priceLevel: row.price_level ?? null,
+    allowsDogs: row.allows_dogs ?? null,
+    hasLiveMusic: row.has_live_music ?? null,
   };
 }
 
@@ -158,9 +188,23 @@ const TOD_OPTIONS = [
   { value: 'late_night', label: 'Late night', emoji: '🌙', desc: 'After 10 pm'  },
 ] as const;
 const TIME_OPTIONS = [
-  { value: 'quick',  label: 'Quick',      emoji: '⚡', desc: 'Under 2 hours' },
-  { value: 'medium', label: 'Few hours',  emoji: '🌅', desc: '2–4 hours'     },
-  { value: 'long',   label: 'All day',    emoji: '🎉', desc: '4+ hours'      },
+  { value: 'quick',    label: 'Quick',          emoji: '⚡',  desc: 'Under 1 hour' },
+  { value: 'couple',   label: 'A couple hours', emoji: '🌅', desc: '1–3 hours'     },
+  { value: 'half_day', label: 'Half day',       emoji: '🌤️', desc: '3–6 hours'     },
+  { value: 'all_day',  label: 'All day',        emoji: '🎉', desc: '6+ hours'      },
+] as const;
+const PRICE_OPTIONS = [
+  { value: '$',   label: 'Budget-friendly', emoji: '💵', desc: 'Keep it cheap'   },
+  { value: '$$',  label: 'Mid-range',       emoji: '💰', desc: 'Reasonable spend' },
+  { value: '$$$', label: 'Splurge',         emoji: '💎', desc: 'Treat yourself'   },
+] as const;
+const DOG_OPTIONS = [
+  { value: 'yes', label: 'Bring the dog', emoji: '🐶', desc: 'Must be dog-friendly' },
+  { value: 'no',  label: 'No dog today',  emoji: '🚫', desc: "Doesn't matter"       },
+] as const;
+const MUSIC_OPTIONS = [
+  { value: 'yes', label: 'Live music',    emoji: '🎵', desc: 'Want some tunes' },
+  { value: 'no',  label: 'No preference', emoji: '🤫', desc: "Doesn't matter"  },
 ] as const;
 
 // ── Animation value type ──────────────────────────────────────────────────────
@@ -184,12 +228,15 @@ export default function HangoutScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [deciding, setDeciding] = useState<string | null>(null);
+  const [undeciding, setUndeciding] = useState(false);
   const [votingField, setVotingField] = useState<string | null>(null);
   const [messages, setMessages] = useState<HangoutMessage[]>([]);
   const [chatText, setChatText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [myDisplayName, setMyDisplayName] = useState<string>('');
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
+  const [reportTarget, setReportTarget] = useState<{ id: string; userId: string; userName: string } | null>(null);
   const chatListRef = useRef<ScrollView>(null);
 
   // Stable refs for animation callbacks and Realtime handlers
@@ -377,6 +424,7 @@ export default function HangoutScreen() {
     setCurrentUserId(user.id);
     setHangout(hangoutRow as Hangout);
     setParticipants((participantRows ?? []) as Participant[]);
+    fetchBlockedUserIds(user.id).then(setBlockedIds).catch(() => {});
 
     const votes = (voteRows ?? []) as Vote[];
     setAllVotes(votes);
@@ -450,7 +498,7 @@ export default function HangoutScreen() {
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
-  const handleVote = useCallback(async (field: 'vibe' | 'setting' | 'budget', value: string) => {
+  const handleVote = useCallback(async (field: VoteField, value: string) => {
     if (!id) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -458,7 +506,11 @@ export default function HangoutScreen() {
     setVotingField(field + value);
 
     const optimistic: Vote = {
-      ...(myVote ?? { id: '', hangout_id: id, user_id: user.id, vibe: null, setting: null, budget: null }),
+      ...(myVote ?? {
+        id: '', hangout_id: id, user_id: user.id,
+        vibe: null, setting: null, budget: null,
+        price: null, dog_friendly: null, live_music: null,
+      }),
       [field]: value,
     };
     const newVotes = [...allVotesRef.current.filter(v => v.user_id !== user.id), optimistic];
@@ -509,6 +561,38 @@ export default function HangoutScreen() {
     ]);
   }, [id, myDisplayName, currentUserId]);
 
+  const handleUndecide = useCallback(() => {
+    if (!id) return;
+    Alert.alert(
+      'Change plans?',
+      'This reopens voting for everyone in the group.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Change plans',
+          style: 'destructive',
+          onPress: async () => {
+            setUndeciding(true);
+            try {
+              await undecideActivity(id);
+              setHangout(prev => (prev ? { ...prev, status: 'voting', selected_activity_id: null } : prev));
+              setSelectedActivity(null);
+
+              const displayName = myDisplayName || 'Friend';
+              await sendMessage(id, currentUserId!, displayName, "↩️ Nevermind — let's pick something else!")
+                .catch(() => {});
+              fetchMessages();
+            } catch (e: any) {
+              Alert.alert('Error changing plans', e.message ?? 'Something went wrong. Try again.');
+            } finally {
+              setUndeciding(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [id, myDisplayName, currentUserId, fetchMessages]);
+
   const handleShare = useCallback(async () => {
     if (!hangout) return;
     const activityLine = selectedActivity
@@ -532,7 +616,7 @@ export default function HangoutScreen() {
   }: {
     label: string;
     options: readonly { value: T; label: string; emoji: string; desc: string }[];
-    field: 'vibe' | 'setting' | 'budget';
+    field: VoteField;
     current: T | null | undefined;
   }) {
     return (
@@ -625,6 +709,7 @@ export default function HangoutScreen() {
   const narrowed = baseActivities.length > displayedActivities.length;
 
   return (
+    <>
     <KeyboardAvoidingView
       style={styles.kavWrapper}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -698,6 +783,17 @@ export default function HangoutScreen() {
             <TouchableOpacity style={styles.decidedShareBtn} onPress={handleShare} activeOpacity={0.8}>
               <Text style={styles.decidedShareBtnText}>Share address with friends 🔗</Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.changePlansBtn, undeciding && styles.decideBtnBusy]}
+              onPress={handleUndecide}
+              disabled={undeciding}
+              activeOpacity={0.8}
+            >
+              {undeciding
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={styles.changePlansBtnText}>Actually, let's keep looking</Text>
+              }
+            </TouchableOpacity>
           </View>
         )}
 
@@ -705,9 +801,12 @@ export default function HangoutScreen() {
         {!decided && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Your vote</Text>
-            <VoteOptionRow label="What are you feeling?" options={FEEL_OPTIONS} field="vibe"    current={myVote?.vibe} />
-            <VoteOptionRow label="What time?"           options={TOD_OPTIONS}  field="setting" current={myVote?.setting} />
-            <VoteOptionRow label="How long?"            options={TIME_OPTIONS} field="budget"  current={myVote?.budget} />
+            <VoteOptionRow label="What are you feeling?" options={FEEL_OPTIONS}  field="vibe"         current={myVote?.vibe} />
+            <VoteOptionRow label="What time?"           options={TOD_OPTIONS}    field="setting"      current={myVote?.setting} />
+            <VoteOptionRow label="How long?"            options={TIME_OPTIONS}   field="budget"       current={myVote?.budget} />
+            <VoteOptionRow label="Budget?"               options={PRICE_OPTIONS}  field="price"        current={myVote?.price} />
+            <VoteOptionRow label="Bringing a dog?"       options={DOG_OPTIONS}    field="dog_friendly" current={myVote?.dog_friendly} />
+            <VoteOptionRow label="Want live music?"      options={MUSIC_OPTIONS}  field="live_music"   current={myVote?.live_music} />
           </View>
         )}
 
@@ -719,9 +818,12 @@ export default function HangoutScreen() {
               <View style={styles.liveDot} />
               <Text style={styles.liveLabel}>Live</Text>
             </View>
-            <TallyRow label="Feeling"  votes={allVotes.map(v => v.vibe)}    options={FEEL_OPTIONS} />
-            <TallyRow label="Time"     votes={allVotes.map(v => v.setting)} options={TOD_OPTIONS} />
-            <TallyRow label="How long" votes={allVotes.map(v => v.budget)}  options={TIME_OPTIONS} />
+            <TallyRow label="Feeling"  votes={allVotes.map(v => v.vibe)}         options={FEEL_OPTIONS} />
+            <TallyRow label="Time"     votes={allVotes.map(v => v.setting)}      options={TOD_OPTIONS} />
+            <TallyRow label="How long" votes={allVotes.map(v => v.budget)}       options={TIME_OPTIONS} />
+            <TallyRow label="Budget"   votes={allVotes.map(v => v.price)}        options={PRICE_OPTIONS} />
+            <TallyRow label="Dog"      votes={allVotes.map(v => v.dog_friendly)} options={DOG_OPTIONS} />
+            <TallyRow label="Music"    votes={allVotes.map(v => v.live_music)}   options={MUSIC_OPTIONS} />
           </View>
         )}
 
@@ -804,13 +906,22 @@ export default function HangoutScreen() {
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled
           >
-            {messages.length === 0
+            {messages.filter(m => !blockedIds.has(m.user_id)).length === 0
               ? <Text style={styles.chatEmptyText}>No messages yet. Say hi!</Text>
-              : messages.map(item => {
+              : messages.filter(m => !blockedIds.has(m.user_id)).map(item => {
                   const isMe = item.user_id === currentUserId;
                   const time = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                   return (
-                    <View key={item.id} style={[styles.chatBubbleWrap, isMe && styles.chatBubbleWrapMe]}>
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[styles.chatBubbleWrap, isMe && styles.chatBubbleWrapMe]}
+                      activeOpacity={isMe ? 1 : 0.7}
+                      onLongPress={() => {
+                        if (isMe) return;
+                        setReportTarget({ id: item.id, userId: item.user_id, userName: item.display_name });
+                      }}
+                      delayLongPress={350}
+                    >
                       <Text style={[styles.chatSenderName, isMe && styles.chatSenderNameMe]}>
                         {isMe ? 'You' : item.display_name}
                       </Text>
@@ -818,7 +929,7 @@ export default function HangoutScreen() {
                         <Text style={[styles.chatBubbleText, isMe && styles.chatBubbleTextMe]}>{item.content}</Text>
                       </View>
                       <Text style={[styles.chatTimestamp, isMe && styles.chatTimestampMe]}>{time}</Text>
-                    </View>
+                    </TouchableOpacity>
                   );
                 })
             }
@@ -851,6 +962,22 @@ export default function HangoutScreen() {
       </ScrollView>
     </SafeAreaView>
     </KeyboardAvoidingView>
+
+    {currentUserId && (
+      <ReportModal
+        visible={!!reportTarget}
+        onClose={() => setReportTarget(null)}
+        reporterId={currentUserId}
+        contentType="hangout_message"
+        contentId={reportTarget?.id ?? ''}
+        reportedUserId={reportTarget?.userId}
+        reportedUserName={reportTarget?.userName}
+        onBlocked={() => {
+          if (reportTarget) setBlockedIds(prev => new Set(prev).add(reportTarget.userId));
+        }}
+      />
+    )}
+    </>
   );
 }
 
@@ -925,6 +1052,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10, alignItems: 'center',
   },
   decidedShareBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  changePlansBtn: {
+    backgroundColor: 'transparent', borderRadius: 10,
+    paddingVertical: 10, alignItems: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)',
+  },
+  changePlansBtnText: { fontSize: 13, fontWeight: '600', color: '#fff' },
 
   voteBlock: { gap: 8 },
   voteBlockLabel: { fontSize: 11, fontWeight: '600', color: '#8E8E93', textTransform: 'uppercase', letterSpacing: 0.5 },

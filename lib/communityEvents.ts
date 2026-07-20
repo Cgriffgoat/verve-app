@@ -56,7 +56,18 @@ export async function fetchCommunityEvents(
     .order('event_date', { ascending: true });
 
   if (error) throw error;
-  return (data ?? []) as CommunityEvent[];
+  const events = (data ?? []) as CommunityEvent[];
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return events;
+
+  const { data: blocked } = await supabase
+    .from('blocked_users')
+    .select('blocked_id')
+    .eq('blocker_id', user.id);
+  const blockedIds = new Set((blocked ?? []).map(b => b.blocked_id as string));
+
+  return events.filter(e => !blockedIds.has(e.creator_id));
 }
 
 export async function submitCommunityEvent(

@@ -9,12 +9,15 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { supabase } from '../../lib/supabase';
 
 const CORAL = '#FF5C5C';
+const PRIVACY_URL = 'https://cgriffgoat.github.io/verve-app/privacy.html';
+const TERMS_URL = 'https://cgriffgoat.github.io/verve-app/terms.html';
 
 export default function LoginScreen() {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
@@ -170,7 +173,15 @@ export default function LoginScreen() {
           </TouchableOpacity>
 
           <Text style={styles.legal}>
-            By continuing you agree to our Terms of Service and Privacy Policy.
+            By continuing you agree to our{' '}
+            <Text style={styles.legalLink} onPress={() => Linking.openURL(TERMS_URL)}>
+              Terms of Service
+            </Text>
+            {' '}and{' '}
+            <Text style={styles.legalLink} onPress={() => Linking.openURL(PRIVACY_URL)}>
+              Privacy Policy
+            </Text>
+            .
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -280,5 +291,9 @@ const styles = StyleSheet.create({
     color: '#BDBDBD',
     textAlign: 'center',
     lineHeight: 16,
+  },
+  legalLink: {
+    color: CORAL,
+    fontWeight: '600',
   },
 });

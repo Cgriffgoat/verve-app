@@ -31,6 +31,8 @@ import {
 import { useActiveLocation } from '../../context/LocationContext';
 import { fetchCommunityEvents, type CommunityEvent } from '../../lib/communityEvents';
 import { SubmitEventModal } from '../../components/SubmitEventModal';
+import { ReportModal } from '../../components/ReportModal';
+import { supabase } from '../../lib/supabase';
 
 const CORAL = '#FF5C5C';
 const COMMUNITY_COLOR = '#AF52DE';
@@ -194,11 +196,11 @@ const SEARCH_TYPES: Array<{ types: string[]; category: string }> = [
   { types: ['bar', 'night_club', 'brewery', 'wine_bar'],                                                           category: 'Nightlife' },
   { types: ['shopping_mall', 'clothing_store', 'book_store', 'market', 'gift_shop'],                               category: 'Shopping' },
   { types: ['museum', 'art_gallery', 'performing_arts_theater', 'historical_landmark', 'library'],                 category: 'Arts & Culture' },
-  { types: ['spa', 'yoga_studio', 'gym', 'fitness_center', 'sports_complex', 'climbing_gym'],                     category: 'Wellness' },
+  { types: ['spa', 'yoga_studio', 'gym', 'fitness_center', 'sports_complex'],                                     category: 'Wellness' },
   { types: ['tourist_attraction', 'stadium'],                                                                       category: 'Events' },
-  { types: ['amusement_center', 'amusement_park', 'go_kart_track', 'escape_room', 'miniature_golf_course'],       category: 'Adventure/Thrill' },
+  { types: ['amusement_center', 'amusement_park', 'go_karting_venue', 'miniature_golf_course'],                   category: 'Adventure/Thrill' },
   { types: ['bowling_alley'],                                                                                       category: 'Games & Hobbies' },
-  { types: ['zoo', 'aquarium', 'trampoline_park', 'water_park', 'playground'],                                     category: 'Family Fun' },
+  { types: ['zoo', 'aquarium', 'water_park', 'playground'],                                                        category: 'Family Fun' },
 ];
 
 const PLACES_NEW = 'https://places.googleapis.com/v1';
@@ -225,6 +227,7 @@ type Place = {
   eventDate?: string;
   eventTime?: string;
   creatorName?: string;
+  creatorId?: string;
 };
 
 async function fetchNearbyNew(
@@ -281,6 +284,7 @@ function communityEventToPlace(e: CommunityEvent): Place {
     eventDate: e.event_date,
     eventTime: e.event_time ?? undefined,
     creatorName: e.creator_display_name ?? undefined,
+    creatorId: e.creator_id,
   };
 }
 
@@ -307,6 +311,12 @@ export default function ExploreScreen() {
   const [activeCategory, setActiveCategory] = useState('Everything');
   const [loadingPlaces, setLoadingPlaces] = useState(false);
   const [submitModalVisible, setSubmitModalVisible] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [reportingPlace, setReportingPlace] = useState<Place | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => setUserId(user?.id ?? null));
+  }, []);
 
   useEffect(() => {
     if (!activeLocation) return;
@@ -569,6 +579,17 @@ export default function ExploreScreen() {
               )}
             </View>
 
+            {/* Report (community events only) */}
+            {selectedPlace.source === 'community' && userId && (
+              <TouchableOpacity
+                style={styles.reportBtn}
+                onPress={() => setReportingPlace(selectedPlace)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={styles.reportBtnText}>Report</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Close */}
             <TouchableOpacity style={styles.closeBtn} onPress={hideCard} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Text style={styles.closeBtnText}>✕</Text>
@@ -576,6 +597,18 @@ export default function ExploreScreen() {
           </View>
         )}
       </Animated.View>
+
+      {userId && (
+        <ReportModal
+          visible={!!reportingPlace}
+          onClose={() => setReportingPlace(null)}
+          reporterId={userId}
+          contentType="community_event"
+          contentId={reportingPlace?.place_id.replace('community_', '') ?? ''}
+          reportedUserId={reportingPlace?.creatorId}
+          reportedUserName={reportingPlace?.creatorName}
+        />
+      )}
     </View>
   );
 }
@@ -773,6 +806,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     color: '#fff',
+  },
+  reportBtn: {
+    paddingHorizontal: 8,
+    justifyContent: 'center',
+  },
+  reportBtnText: {
+    fontSize: 12,
+    color: '#8E8E93',
+    fontWeight: '600',
   },
   closeBtn: {
     padding: 12,

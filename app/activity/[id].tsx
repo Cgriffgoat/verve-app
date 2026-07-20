@@ -18,6 +18,8 @@ import { ScoreBadge } from '../../components/ScoreBadge';
 import { ReviewComposer } from '../../components/ReviewComposer';
 import { ReviewCard } from '../../components/ReviewCard';
 import { BoardPickerModal } from '../../components/BoardPickerModal';
+import { ReportModal } from '../../components/ReportModal';
+import { fetchBlockedUserIds } from '../../lib/moderation';
 import type { Activity, Review } from '../../lib/types';
 
 const COMPOSER_LAYOUT_Y_APPROX = 440; // pixels from top — enough to scroll past hero+photos
@@ -41,6 +43,8 @@ export default function ActivityDetailScreen() {
   const [isSaved, setIsSaved] = useState(false);
   const [boardPickerVisible, setBoardPickerVisible] = useState(false);
   const [editingReview, setEditingReview] = useState<Review | null>(null);
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
+  const [reportTarget, setReportTarget] = useState<Review | null>(null);
 
   const userReview = reviews.find(r => r.user_id === userId) ?? null;
 
@@ -124,6 +128,7 @@ export default function ActivityDetailScreen() {
     setReviews((reviewRows ?? []) as Review[]);
     setUserId(user?.id ?? null);
     setReviewerName(user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? null);
+    if (user) fetchBlockedUserIds(user.id).then(setBlockedIds).catch(() => {});
 
     if (user && id) {
       const { data: saved } = await supabase
@@ -270,22 +275,27 @@ export default function ActivityDetailScreen() {
           )}
 
           {/* ── Reviews ── */}
-          {reviews.length > 0 ? (
-            <>
-              <Text style={styles.reviewsHeader}>
-                {reviews.length} {reviews.length === 1 ? 'review' : 'reviews'}
-              </Text>
-              {reviews.map(review => (
-                <ReviewCard
-                  key={review.id}
-                  review={review}
-                  isOwnReview={review.user_id === userId}
-                  onEdit={() => handleEdit(review)}
-                  onDelete={() => handleDelete(review)}
-                />
-              ))}
-            </>
-          ) : (
+          {(() => {
+            const visibleReviews = reviews.filter(r => !blockedIds.has(r.user_id));
+            return visibleReviews.length > 0 ? (
+              <>
+                <Text style={styles.reviewsHeader}>
+                  {visibleReviews.length} {visibleReviews.length === 1 ? 'review' : 'reviews'}
+                </Text>
+                {visibleReviews.map(review => (
+                  <ReviewCard
+                    key={review.id}
+                    review={review}
+                    isOwnReview={review.user_id === userId}
+                    onEdit={() => handleEdit(review)}
+                    onDelete={() => handleDelete(review)}
+                    onReport={review.user_id === userId ? undefined : () => setReportTarget(review)}
+                  />
+                ))}
+              </>
+            ) : null;
+          })()}
+          {reviews.filter(r => !blockedIds.has(r.user_id)).length === 0 && (
             <View style={styles.noReviews}>
               <Text style={styles.noReviewsEmoji}>💬</Text>
               <Text style={styles.noReviewsTitle}>No reviews yet</Text>
@@ -295,6 +305,21 @@ export default function ActivityDetailScreen() {
 
         </View>
       </ScrollView>
+
+      {userId && (
+        <ReportModal
+          visible={!!reportTarget}
+          onClose={() => setReportTarget(null)}
+          reporterId={userId}
+          contentType="review"
+          contentId={reportTarget?.id ?? ''}
+          reportedUserId={reportTarget?.user_id}
+          reportedUserName={reportTarget?.reviewer_name}
+          onBlocked={() => {
+            if (reportTarget) setBlockedIds(prev => new Set(prev).add(reportTarget.user_id));
+          }}
+        />
+      )}
     </View>
   );
 }
