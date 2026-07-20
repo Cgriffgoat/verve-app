@@ -363,9 +363,53 @@ async function syncVenues(lat: number, lng: number): Promise<void> {
   );
 }
 
+// ── Shared sync cache ──────────────────────────────────────────────────────
+// syncVenues alone fires ~42 Places API calls at Enterprise+Atmosphere pricing.
+// Without this, every app open / pull-to-refresh re-triggers that burst even
+// if someone synced this same area minutes ago. The cache is shared across all
+// users via the `sync_regions` table, so one person's sync covers everyone
+// else nearby for the cache window.
+
+const SYNC_CACHE_HOURS = 12;
+const SYNC_GRID_DEGREES = 0.15; // ~10mi cells — coarser than the 25mi sync radius on purpose
+
+function gridKey(lat: number, lng: number): string {
+  const glat = Math.round(lat / SYNC_GRID_DEGREES) * SYNC_GRID_DEGREES;
+  const glng = Math.round(lng / SYNC_GRID_DEGREES) * SYNC_GRID_DEGREES;
+  return `${glat.toFixed(2)},${glng.toFixed(2)}`;
+}
+
+async function shouldSkipSync(lat: number, lng: number): Promise<boolean> {
+  try {
+    const { data } = await supabase
+      .from('sync_regions')
+      .select('synced_at')
+      .eq('grid_key', gridKey(lat, lng))
+      .maybeSingle();
+    if (!data) return false;
+    const ageHours = (Date.now() - new Date(data.synced_at).getTime()) / 3600000;
+    return ageHours < SYNC_CACHE_HOURS;
+  } catch {
+    return false; // fail open — if the cache table isn't set up yet, just sync normally
+  }
+}
+
+async function markSynced(lat: number, lng: number): Promise<void> {
+  try {
+    await supabase.from('sync_regions').upsert(
+      { grid_key: gridKey(lat, lng), latitude: lat, longitude: lng, synced_at: new Date().toISOString() },
+      { onConflict: 'grid_key' },
+    );
+  } catch {
+    // best-effort — worst case we just re-sync sooner than ideal next time
+  }
+}
+
 // ── Public entry point ─────────────────────────────────────────────────────
 
 export async function syncActivities(latitude: number, longitude: number): Promise<void> {
+  if (await shouldSkipSync(latitude, longitude)) return;
+
   await Promise.all([
     syncMovies(latitude, longitude).catch(e =>
       console.warn('[sync] movies failed:', e.message),
@@ -374,4 +418,6 @@ export async function syncActivities(latitude: number, longitude: number): Promi
       console.warn('[sync] venues failed:', e.message),
     ),
   ]);
+
+  await markSynced(latitude, longitude);
 }
