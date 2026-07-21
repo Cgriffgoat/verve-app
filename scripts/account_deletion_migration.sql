@@ -17,5 +17,5 @@ create table if not exists public.account_deletion_requests (
 
 alter table public.account_deletion_requests enable row level security;
 
-create policy "account_deletion_requests_insert_own" on public.account_deletion_requests
+create policy account_deletion_requests_insert_own on public.account_deletion_requests
   for insert with check (auth.uid() = user_id);

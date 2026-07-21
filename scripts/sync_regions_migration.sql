@@ -15,9 +15,9 @@ create table if not exists public.sync_regions (
 alter table public.sync_regions enable row level security;
 
 -- No personal data here — any authenticated user can read/write the shared cache.
-create policy "sync_regions_select_authenticated" on public.sync_regions
+create policy sync_regions_select_authenticated on public.sync_regions
   for select using (auth.role() = 'authenticated');
-create policy "sync_regions_upsert_authenticated" on public.sync_regions
+create policy sync_regions_upsert_authenticated on public.sync_regions
   for insert with check (auth.role() = 'authenticated');
-create policy "sync_regions_update_authenticated" on public.sync_regions
+create policy sync_regions_update_authenticated on public.sync_regions
   for update using (auth.role() = 'authenticated');

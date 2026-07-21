@@ -15,11 +15,11 @@ create table if not exists public.blocked_users (
 
 alter table public.blocked_users enable row level security;
 
-create policy "blocked_users_select_own" on public.blocked_users
+create policy blocked_users_select_own on public.blocked_users
   for select using (auth.uid() = blocker_id);
-create policy "blocked_users_insert_own" on public.blocked_users
+create policy blocked_users_insert_own on public.blocked_users
   for insert with check (auth.uid() = blocker_id);
-create policy "blocked_users_delete_own" on public.blocked_users
+create policy blocked_users_delete_own on public.blocked_users
   for delete using (auth.uid() = blocker_id);
 
 create table if not exists public.reports (
@@ -38,5 +38,5 @@ alter table public.reports enable row level security;
 
 -- Reporters can file reports but cannot read the queue back — reports are
 -- triaged by the developer via the Supabase dashboard (service role bypasses RLS).
-create policy "reports_insert_own" on public.reports
+create policy reports_insert_own on public.reports
   for insert with check (auth.uid() = reporter_id);
