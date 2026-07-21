@@ -245,7 +245,7 @@ export default function BeenThereScreen() {
               {blockedUsers.map(b => (
                 <View key={b.id} style={styles.blockedRow}>
                   <Text style={styles.blockedName} numberOfLines={1}>
-                    {b.blocked_display_name ?? 'Verve User'}
+                    {b.blocked_display_name ?? 'Vervi User'}
                   </Text>
                   <TouchableOpacity
                     onPress={() => handleUnblock(b)}
@@ -264,7 +264,7 @@ export default function BeenThereScreen() {
 
           <TouchableOpacity
             style={styles.contactRow}
-            onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=Verve%20support`)}
+            onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=Vervi%20support`)}
             activeOpacity={0.7}
           >
             <Text style={styles.contactRowText}>Contact support / report a problem</Text>

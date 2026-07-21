@@ -94,7 +94,7 @@ export default function LoginScreen() {
             <View style={styles.logoMark}>
               <Text style={styles.logoLetter}>V</Text>
             </View>
-            <Text style={styles.appName}>Verve</Text>
+            <Text style={styles.appName}>Vervi</Text>
             <Text style={styles.tagline}>Discover what's good around you</Text>
           </View>
 

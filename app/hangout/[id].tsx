@@ -599,7 +599,7 @@ export default function HangoutScreen() {
       ? `\n\n📍 We're going to: ${selectedActivity.title}\n${selectedActivity.subtitle}`
       : '';
     await Share.share({
-      message: `Join my hangout on Verve! Code: ${hangout.join_code}${activityLine}\n\nOpen Verve → "Plan with friends" → "Join with a code"`,
+      message: `Join my hangout on Vervi! Code: ${hangout.join_code}${activityLine}\n\nOpen Vervi → "Plan with friends" → "Join with a code"`,
     });
   }, [hangout, selectedActivity]);
 

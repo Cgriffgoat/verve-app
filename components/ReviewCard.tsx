@@ -25,7 +25,7 @@ export function ReviewCard({ review, isOwnReview, onEdit, onDelete, onReport }: 
   const [helpfulCount, setHelpfulCount] = useState(review.helpful_count);
   const [liked, setLiked] = useState(false);
 
-  const name = review.reviewer_name ?? 'Verve User';
+  const name = review.reviewer_name ?? 'Vervi User';
   const initials = name
     .split(' ')
     .map(n => n[0])
