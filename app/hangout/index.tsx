@@ -11,7 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { createHangout, joinHangout } from '../../lib/hangouts';
 import { CitySearchModal } from '../../components/CitySearchModal';
@@ -23,11 +23,14 @@ type SelectedCity = { latitude: number; longitude: number; city: string };
 
 export default function HangoutLandingScreen() {
   const router = useRouter();
+  const { code: codeFromLink } = useLocalSearchParams<{ code?: string }>();
 
   const [title, setTitle] = useState('');
   const [selectedCity, setSelectedCity] = useState<SelectedCity | null>(null);
   const [cityModalVisible, setCityModalVisible] = useState(false);
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(() =>
+    (codeFromLink ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6),
+  );
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);

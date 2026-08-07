@@ -598,8 +598,9 @@ export default function HangoutScreen() {
     const activityLine = selectedActivity
       ? `\n\n📍 We're going to: ${selectedActivity.title}\n${selectedActivity.subtitle}`
       : '';
+    const joinLink = `verve://hangout?code=${hangout.join_code}`;
     await Share.share({
-      message: `Join my hangout on Vervi! Code: ${hangout.join_code}${activityLine}\n\nOpen Vervi → "Plan with friends" → "Join with a code"`,
+      message: `Join my hangout on Vervi! Code: ${hangout.join_code}${activityLine}\n\nTap to join: ${joinLink}\n\n(No app yet? Open Vervi → "Plan with friends" → "Join with a code")`,
     });
   }, [hangout, selectedActivity]);
 
