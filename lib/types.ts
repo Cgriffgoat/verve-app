@@ -12,6 +12,9 @@ export type Activity = {
   priceLevel?: '$' | '$$' | '$$$' | null;
   allowsDogs?: boolean | null;
   hasLiveMusic?: boolean | null;
+  googleRating?: number | null;
+  verviScore?: number | null;
+  verviReviewCount?: number;
 };
 
 export type Review = {

@@ -113,6 +113,9 @@ export default function TodayScreen() {
           priceLevel: row.price_level ?? null,
           allowsDogs: row.allows_dogs ?? null,
           hasLiveMusic: row.has_live_music ?? null,
+          googleRating: row.google_rating ?? null,
+          verviScore: row.vervi_avg_score ?? null,
+          verviReviewCount: row.vervi_review_count ?? 0,
         })),
       );
     }

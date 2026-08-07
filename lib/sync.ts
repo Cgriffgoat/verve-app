@@ -37,6 +37,7 @@ type ActivityRow = {
   price_level: string | null;
   allows_dogs: boolean | null;
   has_live_music: boolean | null;
+  google_rating: number | null;
 };
 
 const CATEGORY_GOOD_FOR: Record<string, string[]> = {
@@ -248,9 +249,22 @@ async function syncMovies(lat: number, lng: number): Promise<void> {
     price_level: null,
     allows_dogs: null,
     has_live_music: null,
+    google_rating: null, // TMDB's vote_average isn't a Google rating — leave unset for movies
   }));
 
   await upsert(rows, false);
+
+  // Movies that have left theaters never get removed otherwise — upsert only
+  // adds/refreshes, it doesn't prune. now_playing is a single global TMDB
+  // list, so this is safe to run regardless of which user's sync triggered it.
+  const currentIds = rows.map(r => r.source_id);
+  if (currentIds.length > 0) {
+    await supabase
+      .from('activities')
+      .delete()
+      .eq('source', 'tmdb')
+      .not('source_id', 'in', `(${currentIds.join(',')})`);
+  }
 }
 
 // ── Venues ─────────────────────────────────────────────────────────────────
@@ -343,6 +357,7 @@ function placesToRows(
       price_level: priceBucket(p.priceLevel),
       allows_dogs: typeof p.allowsDogs === 'boolean' ? p.allowsDogs : null,
       has_live_music: typeof p.liveMusic === 'boolean' ? p.liveMusic : null,
+      google_rating: typeof rating === 'number' ? rating : null,
     };
   });
 }
@@ -357,7 +372,11 @@ async function syncVenues(lat: number, lng: number): Promise<void> {
   await Promise.all(
     VENUE_TYPES.map(({ placeType, category, commitment }) =>
       searchNearby(lat, lng, [placeType], VENUE_SYNC_RADIUS_METERS)
-        .then(places => upsert(placesToRows(places, lat, lng, category, commitment)))
+        // ignoreDuplicates: false — refresh existing rows too, otherwise fields
+        // added after a place's first sync (like google_rating) never backfill,
+        // and prices/ratings/photos go stale forever. Cheap now that the shared
+        // sync_regions cache already limits how often this runs per area.
+        .then(places => upsert(placesToRows(places, lat, lng, category, commitment), false))
         .catch(e => console.warn(`[sync] ${placeType}:`, e.message)),
     ),
   );

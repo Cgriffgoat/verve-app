@@ -84,6 +84,12 @@ export async function fetchBoardActivities(boardId: string): Promise<Activity[]>
         distance: a.distance,
         commitment: a.commitment,
         good_for: a.good_for ?? [],
+        priceLevel: a.price_level ?? null,
+        allowsDogs: a.allows_dogs ?? null,
+        hasLiveMusic: a.has_live_music ?? null,
+        googleRating: a.google_rating ?? null,
+        verviScore: a.vervi_avg_score ?? null,
+        verviReviewCount: a.vervi_review_count ?? 0,
       };
     });
 }

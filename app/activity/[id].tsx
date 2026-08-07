@@ -122,6 +122,12 @@ export default function ActivityDetailScreen() {
         distance: activityRow.distance,
         commitment: activityRow.commitment,
         weather: activityRow.weather ?? undefined,
+        priceLevel: activityRow.price_level ?? null,
+        allowsDogs: activityRow.allows_dogs ?? null,
+        hasLiveMusic: activityRow.has_live_music ?? null,
+        googleRating: activityRow.google_rating ?? null,
+        verviScore: activityRow.vervi_avg_score ?? null,
+        verviReviewCount: activityRow.vervi_review_count ?? 0,
       });
     }
 
@@ -180,7 +186,12 @@ export default function ActivityDetailScreen() {
                 <Text style={styles.heroTitle}>{activity.title}</Text>
                 <Text style={styles.heroSubtitle} numberOfLines={2}>{activity.subtitle}</Text>
               </View>
-              <ScoreBadge score={activity.score} />
+              <ScoreBadge
+                score={activity.verviReviewCount && activity.verviReviewCount > 0 && activity.verviScore != null
+                  ? Math.round(activity.verviScore)
+                  : activity.score}
+                reviewCount={activity.verviReviewCount}
+              />
             </View>
           </LinearGradient>
           <TouchableOpacity
@@ -240,9 +251,18 @@ export default function ActivityDetailScreen() {
             <ScoreBar label="Value" value={scoreBreakdown.value} />
             <ScoreBar label="Would Return" value={scoreBreakdown.wouldReturn} />
             <ScoreBar label="Crowd Level" value={scoreBreakdown.crowdLevel} />
-            {reviews.length === 0 && (
+            {reviews.length === 0 ? (
               <Text style={styles.noReviewsNote}>
-                Based on initial score — be the first to review!
+                ⭐ No Vervi reviews yet — be the first to rate this place!
+              </Text>
+            ) : (
+              <Text style={styles.noReviewsNote}>
+                Based on {reviews.length} Vervi {reviews.length === 1 ? 'review' : 'reviews'}
+              </Text>
+            )}
+            {activity.googleRating != null && (
+              <Text style={styles.noReviewsNote}>
+                Google rating: {activity.googleRating.toFixed(1)}★ (for reference only, not from Vervi users)
               </Text>
             )}
           </View>

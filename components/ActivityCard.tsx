@@ -46,6 +46,12 @@ export function ActivityCard({ activity, onPress, isSaved = false, onToggleSave 
   const router = useRouter();
   const [imgErr, setImgErr] = useState(false);
   const showPlaceholder = !activity.imageUrl || imgErr;
+  const reviewCount = activity.verviReviewCount;
+  const displayScore =
+    reviewCount && reviewCount > 0 && activity.verviScore != null
+      ? Math.round(activity.verviScore)
+      : activity.score;
+
   const tags = [
     activity.distance,
     activity.commitment,
@@ -53,6 +59,8 @@ export function ActivityCard({ activity, onPress, isSaved = false, onToggleSave 
     activity.priceLevel,
     activity.allowsDogs ? '🐶 Dog friendly' : null,
     activity.hasLiveMusic ? '🎵 Live music' : null,
+    reviewCount === 0 ? '⭐ Be the first to rate!' : null,
+    activity.googleRating ? `Google ${activity.googleRating.toFixed(1)}★` : null,
   ].filter((t): t is string => Boolean(t));
 
   return (
@@ -85,7 +93,7 @@ export function ActivityCard({ activity, onPress, isSaved = false, onToggleSave 
 
         {/* Score badge — top right */}
         <View style={styles.badge}>
-          <ScoreBadge score={activity.score} />
+          <ScoreBadge score={displayScore} reviewCount={reviewCount} />
         </View>
 
         {/* Bookmark — top left */}

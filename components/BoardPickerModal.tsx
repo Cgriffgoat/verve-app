@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
@@ -73,15 +74,20 @@ export function BoardPickerModal({
 
   const toggleBoard = async (board: TripBoard) => {
     setSaving(board.id);
-    const inBoard = boardIds.has(board.id);
-    if (inBoard) {
-      await removeFromBoard(board.id, activityId);
-      setBoardIds(prev => { const s = new Set(prev); s.delete(board.id); return s; });
-    } else {
-      await addToBoard(board.id, activityId);
-      setBoardIds(prev => new Set([...prev, board.id]));
+    try {
+      const inBoard = boardIds.has(board.id);
+      if (inBoard) {
+        await removeFromBoard(board.id, activityId);
+        setBoardIds(prev => { const s = new Set(prev); s.delete(board.id); return s; });
+      } else {
+        await addToBoard(board.id, activityId);
+        setBoardIds(prev => new Set([...prev, board.id]));
+      }
+    } catch (e: any) {
+      Alert.alert('Could not save', e.message ?? 'Please try again.');
+    } finally {
+      setSaving(null);
     }
-    setSaving(null);
   };
 
   const handleCreateBoard = async () => {
@@ -95,7 +101,9 @@ export function BoardPickerModal({
       setCreatingBoard(false);
       setNewBoardName('');
       setNewBoardLocation('');
-    } catch {}
+    } catch (e: any) {
+      Alert.alert('Could not create board', e.message ?? 'Please try again.');
+    }
     setSaving(null);
   };
 
