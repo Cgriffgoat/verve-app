@@ -24,8 +24,11 @@ import {
   decideActivity,
   undecideActivity,
   sendMessage,
+  addPick,
+  removePick,
   type Hangout,
   type HangoutMessage,
+  type HangoutPick,
   type Participant,
   type Vote,
   type VoteField,
@@ -224,6 +227,8 @@ export default function HangoutScreen() {
   const [baseActivities, setBaseActivities] = useState<Activity[]>([]);
   const [displayedActivities, setDisplayedActivities] = useState<Activity[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
+  const [picks, setPicks] = useState<HangoutPick[]>([]);
+  const [pickingId, setPickingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -406,10 +411,11 @@ export default function HangoutScreen() {
     hangoutLatRef.current = lat;
     hangoutLngRef.current = lng;
 
-    const [{ data: participantRows }, { data: voteRows }, { data: activityRows }] =
+    const [{ data: participantRows }, { data: voteRows }, { data: pickRows }, { data: activityRows }] =
       await Promise.all([
         supabase.from('hangout_participants').select('*').eq('hangout_id', id),
         supabase.from('hangout_votes').select('*').eq('hangout_id', id),
+        supabase.from('hangout_picks').select('*').eq('hangout_id', id),
         (async () => {
           let q = supabase.from('activities').select('*').order('score', { ascending: false }).limit(150);
           if (lat !== null && lng !== null) {
@@ -432,6 +438,7 @@ export default function HangoutScreen() {
     setAllVotes(votes);
     allVotesRef.current = votes;
     setMyVote(votes.find(v => v.user_id === user.id) ?? null);
+    setPicks((pickRows ?? []) as HangoutPick[]);
 
     // Capture display name for chat from participant row
     const myParticipant = (participantRows ?? []).find((p: any) => p.user_id === user.id);
@@ -478,6 +485,12 @@ export default function HangoutScreen() {
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'hangout_participants', filter: `hangout_id=eq.${id}` },
         () => { fetchParticipantsRef.current(); })
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'hangout_picks', filter: `hangout_id=eq.${id}` },
+        (payload) => { setPicks(prev => [...prev, payload.new as HangoutPick]); })
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'hangout_picks', filter: `hangout_id=eq.${id}` },
+        (payload) => { setPicks(prev => prev.filter(p => p.id !== (payload.old as HangoutPick).id)); })
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'hangouts', filter: `id=eq.${id}` },
         async (payload) => {
@@ -569,6 +582,27 @@ export default function HangoutScreen() {
       },
     ]);
   }, [id, myDisplayName, currentUserId]);
+
+  const handleTogglePick = useCallback(async (activity: Activity) => {
+    if (!id || !currentUserId) return;
+    const existing = picks.find(p => p.activity_id === activity.id);
+    setPickingId(activity.id);
+    try {
+      if (existing) {
+        setPicks(prev => prev.filter(p => p.id !== existing.id)); // optimistic
+        await removePick(id, activity.id);
+      } else {
+        await addPick(id, activity.id, currentUserId);
+        // Realtime INSERT event fills in the real row; no local optimistic add
+        // needed since we don't have the server-generated id/timestamp yet.
+      }
+    } catch (e: any) {
+      Alert.alert('Something went wrong', e.message ?? 'Please try again.');
+      fetchAllRef.current();
+    } finally {
+      setPickingId(null);
+    }
+  }, [id, currentUserId, picks]);
 
   const handleUndecide = useCallback(() => {
     if (!id) return;
@@ -772,6 +806,44 @@ export default function HangoutScreen() {
           )}
         </View>
 
+        {/* ── Your plan (pick-N mode) ── */}
+        {!!hangout.target_activity_count && (
+          <View style={styles.card}>
+            <View style={styles.cardTitleRow}>
+              <Text style={styles.cardTitle}>
+                Your plan · {picks.length}/{hangout.target_activity_count} picked
+              </Text>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveLabel}>Live</Text>
+            </View>
+            {picks.length === 0 ? (
+              <Text style={styles.cardSub}>
+                Add places from the list below until you hit {hangout.target_activity_count}.
+              </Text>
+            ) : (
+              picks.map(pick => {
+                const activity = baseActivities.find(a => a.id === pick.activity_id);
+                if (!activity) return null;
+                return (
+                  <View key={pick.id} style={styles.pickRow}>
+                    <Text style={styles.pickRowTitle} numberOfLines={1}>{activity.title}</Text>
+                    <TouchableOpacity
+                      onPress={() => handleTogglePick(activity)}
+                      disabled={pickingId === activity.id}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      {pickingId === activity.id
+                        ? <ActivityIndicator size="small" color={CORAL} />
+                        : <Text style={styles.pickRowRemove}>Remove</Text>
+                      }
+                    </TouchableOpacity>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        )}
+
         {/* ── Group chat ── */}
         <View style={styles.card}>
           <View style={styles.cardTitleRow}>
@@ -942,13 +1014,30 @@ export default function HangoutScreen() {
 
             {displayedActivities.map(activity => {
               const anim = getAnim(activity.id);
+              const isPicked = picks.some(p => p.activity_id === activity.id);
               return (
                 <Animated.View
                   key={activity.id}
                   style={{ opacity: anim.opacity, transform: [{ translateY: anim.slide }] }}
                 >
                   <ActivityCard activity={activity} />
-                  {!decided && (
+                  {hangout.target_activity_count ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.decideBtn,
+                        isPicked && styles.pickBtnActive,
+                        pickingId === activity.id && styles.decideBtnBusy,
+                      ]}
+                      onPress={() => handleTogglePick(activity)}
+                      disabled={pickingId === activity.id}
+                      activeOpacity={0.85}
+                    >
+                      {pickingId === activity.id
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <Text style={styles.decideBtnText}>{isPicked ? '✓ In your plan' : '+ Add to plan'}</Text>
+                      }
+                    </TouchableOpacity>
+                  ) : !decided && (
                     <TouchableOpacity
                       style={[styles.decideBtn, deciding === activity.id && styles.decideBtnBusy]}
                       onPress={() => handleDecide(activity)}
@@ -1110,6 +1199,14 @@ const styles = StyleSheet.create({
   },
   decideBtnBusy: { opacity: 0.6 },
   decideBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  pickBtnActive: { backgroundColor: INDIGO },
+
+  pickRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 8,
+  },
+  pickRowTitle: { fontSize: 14, fontWeight: '600', color: '#1A1A1A', flex: 1, marginRight: 10 },
+  pickRowRemove: { fontSize: 13, fontWeight: '600', color: CORAL },
 
   emptyHint: { alignItems: 'center', paddingVertical: 20, paddingHorizontal: 32 },
   emptyHintText: { fontSize: 14, color: '#8E8E93', textAlign: 'center', lineHeight: 20 },

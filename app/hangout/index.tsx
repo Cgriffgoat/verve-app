@@ -27,6 +27,7 @@ export default function HangoutLandingScreen() {
   const { code: codeFromLink } = useLocalSearchParams<{ code?: string }>();
 
   const [title, setTitle] = useState('');
+  const [targetCount, setTargetCount] = useState('');
   const [selectedCity, setSelectedCity] = useState<SelectedCity | null>(null);
   const [cityModalVisible, setCityModalVisible] = useState(false);
   const [code, setCode] = useState(() =>
@@ -89,6 +90,7 @@ export default function HangoutLandingScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not signed in');
       const displayName = user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? 'Someone';
+      const parsedTarget = parseInt(targetCount, 10);
       const hangout = await createHangout(
         user.id,
         displayName,
@@ -96,6 +98,7 @@ export default function HangoutLandingScreen() {
         selectedCity
           ? { latitude: selectedCity.latitude, longitude: selectedCity.longitude, city_name: selectedCity.city }
           : undefined,
+        Number.isFinite(parsedTarget) && parsedTarget > 0 ? parsedTarget : undefined,
       );
       router.replace(`/hangout/${hangout.id}`);
     } catch (e: any) {
@@ -243,6 +246,25 @@ export default function HangoutLandingScreen() {
               <TouchableOpacity onPress={() => setCityModalVisible(true)}>
                 <Text style={styles.changeCityLink}>Change location</Text>
               </TouchableOpacity>
+            )}
+
+            <TextInput
+              style={styles.input}
+              placeholder="How many places to lock in? (optional)"
+              placeholderTextColor="#BDBDBD"
+              value={targetCount}
+              onChangeText={t => setTargetCount(t.replace(/[^0-9]/g, '').slice(0, 2))}
+              keyboardType="number-pad"
+              returnKeyType="done"
+            />
+            {targetCount ? (
+              <Text style={styles.targetCountHint}>
+                Anyone can add places until you hit {targetCount} — no single "final" pick needed.
+              </Text>
+            ) : (
+              <Text style={styles.targetCountHint}>
+                Leave blank for the classic mode: vote together, then lock in one place.
+              </Text>
             )}
 
             <TouchableOpacity
@@ -407,6 +429,7 @@ const styles = StyleSheet.create({
   cityRowChevron: { fontSize: 18, color: '#C7C7CC' },
   cityRowClear: { fontSize: 14, color: '#8E8E93', fontWeight: '600', paddingHorizontal: 4 },
   changeCityLink: { fontSize: 13, color: CORAL, fontWeight: '600', marginTop: -6 },
+  targetCountHint: { fontSize: 12, color: '#8E8E93', marginTop: -6, lineHeight: 16 },
 
   primaryBtn: {
     borderRadius: 14,

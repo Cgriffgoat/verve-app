@@ -10,7 +10,16 @@ export type Hangout = {
   latitude: number | null;
   longitude: number | null;
   city_name: string | null;
+  target_activity_count: number | null;
   created_at: string;
+};
+
+export type HangoutPick = {
+  id: string;
+  hangout_id: string;
+  activity_id: string;
+  picked_by: string;
+  picked_at: string;
 };
 
 export type MyHangout = Hangout & { is_creator: boolean };
@@ -69,6 +78,7 @@ export async function createHangout(
   displayName: string,
   title?: string,
   location?: HangoutLocation,
+  targetActivityCount?: number,
 ): Promise<Hangout> {
   let hangout: Hangout | null = null;
 
@@ -82,6 +92,7 @@ export async function createHangout(
         latitude: location?.latitude ?? null,
         longitude: location?.longitude ?? null,
         city_name: location?.city_name ?? null,
+        target_activity_count: targetActivityCount ?? null,
       })
       .select()
       .single();
@@ -183,6 +194,23 @@ export async function undecideActivity(hangoutId: string): Promise<void> {
     .from('hangouts')
     .update({ status: 'voting', selected_activity_id: null })
     .eq('id', hangoutId);
+  if (error) throw error;
+}
+
+// "Pick N activities" mode — an alternative to the single decideActivity flow.
+export async function addPick(hangoutId: string, activityId: string, userId: string): Promise<void> {
+  const { error } = await supabase.from('hangout_picks').upsert(
+    { hangout_id: hangoutId, activity_id: activityId, picked_by: userId },
+    { onConflict: 'hangout_id,activity_id', ignoreDuplicates: true },
+  );
+  if (error) throw error;
+}
+
+export async function removePick(hangoutId: string, activityId: string): Promise<void> {
+  const { error } = await supabase
+    .from('hangout_picks')
+    .delete()
+    .match({ hangout_id: hangoutId, activity_id: activityId });
   if (error) throw error;
 }
 
