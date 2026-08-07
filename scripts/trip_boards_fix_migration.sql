@@ -21,14 +21,26 @@ create table if not exists public.trip_board_members (
 
 alter table public.trip_board_members enable row level security;
 
+-- SECURITY DEFINER so this bypasses RLS for its own internal lookup — a raw
+-- EXISTS subquery against trip_board_members from inside that table's own
+-- policy (or from another table's policy) causes "infinite recursion
+-- detected in policy", since the subquery re-triggers RLS on the same table.
+create or replace function public.is_trip_board_member(_board_id uuid, _user_id uuid)
+returns boolean
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.trip_board_members
+    where board_id = _board_id and user_id = _user_id
+  );
+$$;
+
 drop policy if exists trip_board_members_select on public.trip_board_members;
 create policy trip_board_members_select on public.trip_board_members
-  for select using (
-    exists (
-      select 1 from public.trip_board_members m
-      where m.board_id = trip_board_members.board_id and m.user_id = auth.uid()
-    )
-  );
+  for select using (public.is_trip_board_member(board_id, auth.uid()));
 
 drop policy if exists trip_board_members_insert_self on public.trip_board_members;
 create policy trip_board_members_insert_self on public.trip_board_members
@@ -37,12 +49,7 @@ create policy trip_board_members_insert_self on public.trip_board_members
 -- trip_boards: members (not just the owner) can view the board
 drop policy if exists trip_boards_select_member on public.trip_boards;
 create policy trip_boards_select_member on public.trip_boards
-  for select using (
-    exists (
-      select 1 from public.trip_board_members m
-      where m.board_id = trip_boards.id and m.user_id = auth.uid()
-    )
-  );
+  for select using (public.is_trip_board_member(id, auth.uid()));
 
 -- Anyone with the join code can look up the board to join it (the code
 -- itself is the security gate, same model as hangouts.hangouts_select_by_code)
@@ -53,30 +60,15 @@ create policy trip_boards_select_by_code on public.trip_boards
 -- trip_board_items: any member can view/add/remove, not just the owner
 drop policy if exists trip_board_items_insert_own on public.trip_board_items;
 create policy trip_board_items_insert_own on public.trip_board_items
-  for insert with check (
-    exists (
-      select 1 from public.trip_board_members m
-      where m.board_id = trip_board_items.board_id and m.user_id = auth.uid()
-    )
-  );
+  for insert with check (public.is_trip_board_member(board_id, auth.uid()));
 
 drop policy if exists trip_board_items_select_own on public.trip_board_items;
 create policy trip_board_items_select_own on public.trip_board_items
-  for select using (
-    exists (
-      select 1 from public.trip_board_members m
-      where m.board_id = trip_board_items.board_id and m.user_id = auth.uid()
-    )
-  );
+  for select using (public.is_trip_board_member(board_id, auth.uid()));
 
 drop policy if exists trip_board_items_delete_own on public.trip_board_items;
 create policy trip_board_items_delete_own on public.trip_board_items
-  for delete using (
-    exists (
-      select 1 from public.trip_board_members m
-      where m.board_id = trip_board_items.board_id and m.user_id = auth.uid()
-    )
-  );
+  for delete using (public.is_trip_board_member(board_id, auth.uid()));
 
 -- Backfill: make every existing board owner a member row, and give existing
 -- boards a join code, so nothing already created breaks under the new model.
