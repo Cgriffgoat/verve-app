@@ -11,20 +11,22 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../../lib/supabase';
-import { fetchUserBoards, createBoard, type TripBoard } from '../../lib/boards';
+import { fetchUserBoards, createBoard, joinBoard, type TripBoard } from '../../lib/boards';
 import { ActivityCard } from '../../components/ActivityCard';
 import type { Activity } from '../../lib/types';
 
 const CORAL = '#FF5C5C';
+const INDIGO = '#5B7FFF';
 
 type Tab = 'saved' | 'boards';
 
 export default function SavedScreen() {
   const router = useRouter();
+  const { code: codeFromLink } = useLocalSearchParams<{ code?: string }>();
 
-  const [tab, setTab] = useState<Tab>('saved');
+  const [tab, setTab] = useState<Tab>(codeFromLink ? 'boards' : 'saved');
   const [userId, setUserId] = useState<string | null>(null);
 
   // Saved tab state
@@ -40,6 +42,11 @@ export default function SavedScreen() {
   const [newName, setNewName] = useState('');
   const [newLocation, setNewLocation] = useState('');
   const [creating, setCreating] = useState(false);
+  const [showJoinForm, setShowJoinForm] = useState(!!codeFromLink);
+  const [joinCode, setJoinCode] = useState(() =>
+    (codeFromLink ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6),
+  );
+  const [joining, setJoining] = useState(false);
 
   // ── Fetch saved activities ─────────────────────────────────────────────────
 
@@ -107,7 +114,9 @@ export default function SavedScreen() {
     if (!userId || !newName.trim()) return;
     setCreating(true);
     try {
-      const board = await createBoard(userId, newName, newLocation);
+      const { data: { user } } = await supabase.auth.getUser();
+      const displayName = user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'Someone';
+      const board = await createBoard(userId, newName, newLocation, displayName);
       setBoards(prev => [board, ...prev]);
       setNewName('');
       setNewLocation('');
@@ -116,6 +125,23 @@ export default function SavedScreen() {
       Alert.alert('Error', e.message);
     }
     setCreating(false);
+  };
+
+  const handleJoinBoard = async () => {
+    if (!userId || joinCode.trim().length < 6) return;
+    setJoining(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const displayName = user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'Someone';
+      const board = await joinBoard(joinCode, userId, displayName);
+      router.push(`/board/${board.id}`);
+      setShowJoinForm(false);
+      setJoinCode('');
+      fetchBoards();
+    } catch (e: any) {
+      Alert.alert('Could not join', e.message);
+    }
+    setJoining(false);
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -127,12 +153,20 @@ export default function SavedScreen() {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Saved</Text>
         {tab === 'boards' && (
-          <TouchableOpacity
-            style={styles.newBoardBtn}
-            onPress={() => { setShowCreateForm(v => !v); }}
-          >
-            <Text style={styles.newBoardBtnText}>+ New board</Text>
-          </TouchableOpacity>
+          <View style={styles.headerBtns}>
+            <TouchableOpacity
+              style={styles.joinBoardBtn}
+              onPress={() => { setShowJoinForm(v => !v); setShowCreateForm(false); }}
+            >
+              <Text style={styles.joinBoardBtnText}>Join with code</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.newBoardBtn}
+              onPress={() => { setShowCreateForm(v => !v); setShowJoinForm(false); }}
+            >
+              <Text style={styles.newBoardBtnText}>+ New board</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
 
@@ -242,6 +276,41 @@ export default function SavedScreen() {
             </View>
           )}
 
+          {/* Join form */}
+          {showJoinForm && (
+            <View style={styles.createForm}>
+              <TextInput
+                style={[styles.input, styles.joinCodeInput]}
+                placeholder="ABC123"
+                placeholderTextColor="#BDBDBD"
+                value={joinCode}
+                onChangeText={t => setJoinCode(t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
+                maxLength={6}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                autoFocus
+              />
+              <View style={styles.createActions}>
+                <TouchableOpacity
+                  style={styles.cancelBtn}
+                  onPress={() => { setShowJoinForm(false); setJoinCode(''); }}
+                >
+                  <Text style={styles.cancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.createBtn, { backgroundColor: INDIGO }, (joinCode.length < 6 || joining) && styles.createBtnDisabled]}
+                  onPress={handleJoinBoard}
+                  disabled={joinCode.length < 6 || joining}
+                >
+                  {joining
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <Text style={styles.createBtnText}>Join board</Text>
+                  }
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           {loadingBoards ? (
             <View style={styles.centered}>
               <ActivityIndicator size="large" color={CORAL} />
@@ -303,6 +372,7 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   headerTitle: { fontSize: 28, fontWeight: '800', color: '#1A1A1A', letterSpacing: -0.5 },
+  headerBtns: { flexDirection: 'row', gap: 8 },
   newBoardBtn: {
     backgroundColor: CORAL,
     borderRadius: 20,
@@ -310,6 +380,14 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   newBoardBtnText: { fontSize: 13, fontWeight: '700', color: '#fff' },
+  joinBoardBtn: {
+    backgroundColor: '#EEF2FF',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  joinBoardBtnText: { fontSize: 13, fontWeight: '700', color: INDIGO },
+  joinCodeInput: { fontSize: 20, fontWeight: '700', letterSpacing: 4, textAlign: 'center' },
 
   tabRow: {
     flexDirection: 'row',

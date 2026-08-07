@@ -7,19 +7,23 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  Share,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import {
   fetchBoardActivities,
+  fetchBoardMembers,
   removeFromBoard,
   type TripBoard,
+  type BoardMember,
 } from '../../lib/boards';
 import { ActivityCard } from '../../components/ActivityCard';
 import type { Activity } from '../../lib/types';
 
 const CORAL = '#FF5C5C';
+const INDIGO = '#5B7FFF';
 
 export default function BoardDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -27,19 +31,30 @@ export default function BoardDetailScreen() {
   const insets = useSafeAreaInsets();
 
   const [board, setBoard] = useState<TripBoard | null>(null);
+  const [members, setMembers] = useState<BoardMember[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchData = useCallback(async () => {
     if (!id) return;
-    const [{ data: boardRow }, acts] = await Promise.all([
+    const [{ data: boardRow }, acts, memberRows] = await Promise.all([
       supabase.from('trip_boards').select('*').eq('id', id).single(),
       fetchBoardActivities(id),
+      fetchBoardMembers(id),
     ]);
     if (boardRow) setBoard({ ...boardRow, item_count: acts.length });
     setActivities(acts);
+    setMembers(memberRows);
   }, [id]);
+
+  const handleShare = useCallback(async () => {
+    if (!board) return;
+    const joinLink = `verve://saved?code=${board.join_code}`;
+    await Share.share({
+      message: `Plan "${board.name}" with me on Vervi! Code: ${board.join_code}\n\nTap to join: ${joinLink}\n\n(No app yet? Open Vervi → Saved → Trip boards → "Join with code")`,
+    });
+  }, [board]);
 
   useEffect(() => {
     setLoading(true);
@@ -77,7 +92,13 @@ export default function BoardDetailScreen() {
             <Text style={styles.headerSub}>{board.location}</Text>
           ) : null}
         </View>
-        <View style={{ width: 36 }} />
+        <TouchableOpacity
+          style={styles.shareBtn}
+          onPress={handleShare}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.shareBtnText}>Share</Text>
+        </TouchableOpacity>
       </View>
 
       {loading ? (
@@ -92,6 +113,20 @@ export default function BoardDetailScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={CORAL} />
           }
         >
+          {members.length > 1 && (
+            <View style={styles.membersRow}>
+              {members.map(m => (
+                <View key={m.id} style={styles.memberChip}>
+                  <View style={styles.memberAvatar}>
+                    <Text style={styles.memberAvatarText}>
+                      {(m.display_name ?? '?').charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={styles.memberName} numberOfLines={1}>{m.display_name ?? 'Friend'}</Text>
+                </View>
+              ))}
+            </View>
+          )}
           {activities.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyIcon}>🗺️</Text>
@@ -145,6 +180,27 @@ const styles = StyleSheet.create({
   headerCenter: { flex: 1, alignItems: 'center' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: '#1A1A1A' },
   headerSub: { fontSize: 12, color: '#8E8E93', marginTop: 1 },
+  shareBtn: {
+    backgroundColor: '#EEF2FF', borderRadius: 20,
+    paddingHorizontal: 12, paddingVertical: 8,
+  },
+  shareBtnText: { fontSize: 13, fontWeight: '700', color: INDIGO },
+
+  membersRow: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
+    paddingHorizontal: 20, paddingTop: 16,
+  },
+  memberChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#F2F2F2', borderRadius: 20,
+    paddingVertical: 5, paddingHorizontal: 10,
+  },
+  memberAvatar: {
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: CORAL, alignItems: 'center', justifyContent: 'center',
+  },
+  memberAvatarText: { fontSize: 11, fontWeight: '700', color: '#fff', lineHeight: 14 },
+  memberName: { fontSize: 13, fontWeight: '600', color: '#1A1A1A', maxWidth: 90 },
 
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 

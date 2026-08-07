@@ -6,18 +6,39 @@ export type TripBoard = {
   user_id: string;
   name: string;
   location: string | null;
+  join_code: string;
   created_at: string;
   item_count: number;
 };
 
-export async function fetchUserBoards(userId: string): Promise<TripBoard[]> {
-  const { data: boards } = await supabase
-    .from('trip_boards')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+export type BoardMember = {
+  id: string;
+  board_id: string;
+  user_id: string;
+  display_name: string | null;
+  role: 'owner' | 'member';
+  joined_at: string;
+};
 
-  if (!boards || boards.length === 0) return [];
+function generateCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+// Boards you own OR were invited into via code
+export async function fetchUserBoards(userId: string): Promise<TripBoard[]> {
+  const { data: memberRows } = await supabase
+    .from('trip_board_members')
+    .select('trip_boards(*)')
+    .eq('user_id', userId);
+
+  const boards = (memberRows ?? [])
+    .map((r: any) => r.trip_boards as TripBoard | null)
+    .filter((b): b is TripBoard => b != null);
+
+  if (boards.length === 0) return [];
 
   const { data: items } = await supabase
     .from('trip_board_items')
@@ -29,21 +50,77 @@ export async function fetchUserBoards(userId: string): Promise<TripBoard[]> {
     countMap[r.board_id] = (countMap[r.board_id] ?? 0) + 1;
   });
 
-  return boards.map(b => ({ ...b, item_count: countMap[b.id] ?? 0 }));
+  const withCounts = boards.map(b => ({ ...b, item_count: countMap[b.id] ?? 0 }));
+  withCounts.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  return withCounts;
 }
 
 export async function createBoard(
   userId: string,
   name: string,
   location?: string,
+  displayName?: string,
+): Promise<TripBoard> {
+  let board: TripBoard | null = null;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data, error } = await supabase
+      .from('trip_boards')
+      .insert({
+        user_id: userId,
+        name: name.trim(),
+        location: location?.trim() || null,
+        join_code: generateCode(),
+      })
+      .select()
+      .single();
+
+    if (error?.code === '23505') continue; // code collision — retry
+    if (error) throw error;
+    board = data as TripBoard;
+    break;
+  }
+
+  if (!board) throw new Error('Failed to generate a unique code. Try again.');
+
+  await supabase.from('trip_board_members').insert({
+    board_id: board.id,
+    user_id: userId,
+    display_name: displayName ?? null,
+    role: 'owner',
+  });
+
+  return { ...board, item_count: 0 };
+}
+
+export async function joinBoard(
+  joinCode: string,
+  userId: string,
+  displayName: string,
 ): Promise<TripBoard> {
   const { data, error } = await supabase
     .from('trip_boards')
-    .insert({ user_id: userId, name: name.trim(), location: location?.trim() || null })
-    .select()
+    .select('*')
+    .eq('join_code', joinCode.toUpperCase().trim())
     .single();
-  if (error) throw error;
-  return { ...data, item_count: 0 };
+
+  if (error || !data) throw new Error('No trip board found with that code.');
+
+  await supabase.from('trip_board_members').upsert(
+    { board_id: data.id, user_id: userId, display_name: displayName, role: 'member' },
+    { onConflict: 'board_id,user_id', ignoreDuplicates: false },
+  );
+
+  return data as TripBoard;
+}
+
+export async function fetchBoardMembers(boardId: string): Promise<BoardMember[]> {
+  const { data } = await supabase
+    .from('trip_board_members')
+    .select('*')
+    .eq('board_id', boardId)
+    .order('joined_at', { ascending: true });
+  return (data ?? []) as BoardMember[];
 }
 
 export async function addToBoard(boardId: string, activityId: string): Promise<void> {

@@ -94,7 +94,9 @@ export function BoardPickerModal({
     if (!newBoardName.trim()) return;
     setSaving('new');
     try {
-      const board = await createBoard(userId, newBoardName, newBoardLocation);
+      const { data: { user } } = await supabase.auth.getUser();
+      const displayName = user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'Someone';
+      const board = await createBoard(userId, newBoardName, newBoardLocation, displayName);
       await addToBoard(board.id, activityId);
       setBoards(prev => [{ ...board, item_count: 1 }, ...prev]);
       setBoardIds(prev => new Set([...prev, board.id]));
