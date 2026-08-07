@@ -44,7 +44,8 @@
         {
           "photosPermission": "Verve needs photo access to let you add pictures to your profile."
         }
-      ]
+      ],
+      "expo-sharing"
     ]
   }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { LocationProvider } from '../context/LocationContext';
@@ -34,9 +35,11 @@ export default function RootLayout() {
   }, [session, segments]);
 
   return (
-    <LocationProvider>
-      <Stack screenOptions={{ headerShown: false }} />
-      <StatusBar style="auto" />
-    </LocationProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <LocationProvider>
+        <Stack screenOptions={{ headerShown: false }} />
+        <StatusBar style="auto" />
+      </LocationProvider>
+    </GestureHandlerRootView>
   );
 }

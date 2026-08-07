@@ -1,14 +1,24 @@
 import { supabase } from './supabase';
 import type { Activity } from './types';
 
+export type ItineraryTemplate = 'minimal' | 'sunset' | 'night';
+
 export type TripBoard = {
   id: string;
   user_id: string;
   name: string;
   location: string | null;
   join_code: string;
+  itinerary_template: ItineraryTemplate;
   created_at: string;
   item_count: number;
+};
+
+export type ItineraryItem = {
+  activity: Activity;
+  scheduledDate: string | null; // 'YYYY-MM-DD'
+  scheduledTime: string | null; // 'HH:MM' 24hr
+  sortOrder: number;
 };
 
 export type BoardMember = {
@@ -140,6 +150,26 @@ export async function removeFromBoard(boardId: string, activityId: string): Prom
     .match({ board_id: boardId, activity_id: activityId });
 }
 
+function rowToActivity(a: any): Activity {
+  return {
+    id: String(a.id),
+    title: a.title,
+    subtitle: a.subtitle,
+    category: a.category,
+    score: a.score,
+    imageUrl: a.photo_url,
+    distance: a.distance,
+    commitment: a.commitment,
+    good_for: a.good_for ?? [],
+    priceLevel: a.price_level ?? null,
+    allowsDogs: a.allows_dogs ?? null,
+    hasLiveMusic: a.has_live_music ?? null,
+    googleRating: a.google_rating ?? null,
+    verviScore: a.vervi_avg_score ?? null,
+    verviReviewCount: a.vervi_review_count ?? 0,
+  };
+}
+
 export async function fetchBoardActivities(boardId: string): Promise<Activity[]> {
   const { data } = await supabase
     .from('trip_board_items')
@@ -149,26 +179,7 @@ export async function fetchBoardActivities(boardId: string): Promise<Activity[]>
 
   return ((data ?? []) as any[])
     .filter(r => r.activities)
-    .map(r => {
-      const a = r.activities;
-      return {
-        id: String(a.id),
-        title: a.title,
-        subtitle: a.subtitle,
-        category: a.category,
-        score: a.score,
-        imageUrl: a.photo_url,
-        distance: a.distance,
-        commitment: a.commitment,
-        good_for: a.good_for ?? [],
-        priceLevel: a.price_level ?? null,
-        allowsDogs: a.allows_dogs ?? null,
-        hasLiveMusic: a.has_live_music ?? null,
-        googleRating: a.google_rating ?? null,
-        verviScore: a.vervi_avg_score ?? null,
-        verviReviewCount: a.vervi_review_count ?? 0,
-      };
-    });
+    .map(r => rowToActivity(r.activities));
 }
 
 // Returns board IDs that contain this activity (RLS scopes to current user's boards)
@@ -178,4 +189,72 @@ export async function fetchBoardIdsForActivity(activityId: string): Promise<stri
     .select('board_id')
     .eq('activity_id', activityId);
   return (data ?? []).map(r => r.board_id);
+}
+
+// ── Itinerary ──────────────────────────────────────────────────────────────
+
+export async function fetchItineraryItems(boardId: string): Promise<ItineraryItem[]> {
+  const { data } = await supabase
+    .from('trip_board_items')
+    .select('activity_id, scheduled_date, scheduled_time, sort_order, activities(*)')
+    .eq('board_id', boardId)
+    .order('sort_order', { ascending: true });
+
+  return ((data ?? []) as any[])
+    .filter(r => r.activities)
+    .map(r => ({
+      activity: rowToActivity(r.activities),
+      scheduledDate: r.scheduled_date,
+      scheduledTime: r.scheduled_time,
+      sortOrder: r.sort_order ?? 0,
+    }));
+}
+
+export async function scheduleItem(
+  boardId: string,
+  activityId: string,
+  date: string,
+  time: string | null,
+  sortOrder: number,
+): Promise<void> {
+  const { error } = await supabase
+    .from('trip_board_items')
+    .update({ scheduled_date: date, scheduled_time: time, sort_order: sortOrder })
+    .match({ board_id: boardId, activity_id: activityId });
+  if (error) throw error;
+}
+
+export async function unscheduleItem(boardId: string, activityId: string): Promise<void> {
+  const { error } = await supabase
+    .from('trip_board_items')
+    .update({ scheduled_date: null, scheduled_time: null, sort_order: 0 })
+    .match({ board_id: boardId, activity_id: activityId });
+  if (error) throw error;
+}
+
+// Batch-updates sort_order for every item in a day, in the given order —
+// used after a drag-to-reorder.
+export async function reorderDay(
+  boardId: string,
+  activityIdsInOrder: string[],
+): Promise<void> {
+  await Promise.all(
+    activityIdsInOrder.map((activityId, index) =>
+      supabase
+        .from('trip_board_items')
+        .update({ sort_order: index })
+        .match({ board_id: boardId, activity_id: activityId }),
+    ),
+  );
+}
+
+export async function updateBoardTemplate(
+  boardId: string,
+  template: ItineraryTemplate,
+): Promise<void> {
+  const { error } = await supabase
+    .from('trip_boards')
+    .update({ itinerary_template: template })
+    .eq('id', boardId);
+  if (error) throw error;
 }

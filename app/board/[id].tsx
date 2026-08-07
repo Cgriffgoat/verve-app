@@ -127,6 +127,22 @@ export default function BoardDetailScreen() {
               ))}
             </View>
           )}
+
+          {activities.length > 0 && (
+            <TouchableOpacity
+              style={styles.itineraryBtn}
+              onPress={() => router.push(`/itinerary/${id}`)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.itineraryBtnEmoji}>🗓️</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.itineraryBtnTitle}>Build itinerary</Text>
+                <Text style={styles.itineraryBtnSub}>Schedule these places onto days and times</Text>
+              </View>
+              <Text style={styles.itineraryBtnChevron}>›</Text>
+            </TouchableOpacity>
+          )}
+
           {activities.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyIcon}>🗺️</Text>
@@ -201,6 +217,18 @@ const styles = StyleSheet.create({
   },
   memberAvatarText: { fontSize: 11, fontWeight: '700', color: '#fff', lineHeight: 14 },
   memberName: { fontSize: 13, fontWeight: '600', color: '#1A1A1A', maxWidth: 90 },
+
+  itineraryBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginHorizontal: 20, marginTop: 16,
+    backgroundColor: '#EEF2FF', borderRadius: 14,
+    paddingVertical: 12, paddingHorizontal: 14,
+    borderWidth: 1, borderColor: '#DDE3FF',
+  },
+  itineraryBtnEmoji: { fontSize: 22 },
+  itineraryBtnTitle: { fontSize: 14, fontWeight: '700', color: INDIGO },
+  itineraryBtnSub: { fontSize: 12, color: '#6B7FCC', marginTop: 1 },
+  itineraryBtnChevron: { fontSize: 18, color: '#8E9FDF' },
 
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
