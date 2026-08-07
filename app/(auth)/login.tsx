@@ -44,7 +44,19 @@ export default function LoginScreen() {
           provider: 'apple',
           token: credential.identityToken,
         });
-        if (error) Alert.alert('Sign in failed', error.message);
+        if (error) {
+          Alert.alert('Sign in failed', error.message);
+        } else {
+          // Apple only returns the name on the very first authorization ever —
+          // capture it now or it's gone for good, since Apple never sends it again.
+          const fullName = [credential.fullName?.givenName, credential.fullName?.familyName]
+            .filter(Boolean)
+            .join(' ')
+            .trim();
+          if (fullName) {
+            await supabase.auth.updateUser({ data: { full_name: fullName } }).catch(() => {});
+          }
+        }
       }
     } catch (e: any) {
       if (e.code !== 'ERR_REQUEST_CANCELED') {

@@ -13,6 +13,8 @@ export type Hangout = {
   created_at: string;
 };
 
+export type MyHangout = Hangout & { is_creator: boolean };
+
 export type Participant = {
   id: string;
   hangout_id: string;
@@ -114,9 +116,10 @@ export async function joinHangout(
 
   if (error || !data) throw new Error('No hangout found with that code.');
 
+  // ignoreDuplicates would leave a stale/bad display_name in place forever on rejoin
   await supabase.from('hangout_participants').upsert(
     { hangout_id: data.id, user_id: userId, display_name: displayName },
-    { onConflict: 'hangout_id,user_id', ignoreDuplicates: true },
+    { onConflict: 'hangout_id,user_id', ignoreDuplicates: false },
   );
 
   return data as Hangout;
@@ -180,5 +183,28 @@ export async function undecideActivity(hangoutId: string): Promise<void> {
     .from('hangouts')
     .update({ status: 'voting', selected_activity_id: null })
     .eq('id', hangoutId);
+  if (error) throw error;
+}
+
+export async function fetchMyHangouts(userId: string): Promise<MyHangout[]> {
+  const { data, error } = await supabase
+    .from('hangout_participants')
+    .select('hangouts(*)')
+    .eq('user_id', userId);
+  if (error) throw error;
+
+  const hangouts = (data ?? [])
+    .map((r: any) => r.hangouts as Hangout | null)
+    .filter((h): h is Hangout => h != null)
+    .map(h => ({ ...h, is_creator: h.creator_id === userId }));
+
+  hangouts.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  return hangouts;
+}
+
+// Creator-only — RLS enforces this. Child rows (participants/votes/messages)
+// are cleaned up by a database trigger, not here.
+export async function deleteHangout(hangoutId: string): Promise<void> {
+  const { error } = await supabase.from('hangouts').delete().eq('id', hangoutId);
   if (error) throw error;
 }

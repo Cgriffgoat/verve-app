@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,11 +9,12 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
-import { createHangout, joinHangout } from '../../lib/hangouts';
+import { createHangout, joinHangout, fetchMyHangouts, deleteHangout, type MyHangout } from '../../lib/hangouts';
 import { CitySearchModal } from '../../components/CitySearchModal';
 
 const CORAL = '#FF5C5C';
@@ -34,6 +35,52 @@ export default function HangoutLandingScreen() {
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [myHangouts, setMyHangouts] = useState<MyHangout[]>([]);
+  const [loadingHangouts, setLoadingHangouts] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      (async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || cancelled) return;
+        try {
+          const list = await fetchMyHangouts(user.id);
+          if (!cancelled) setMyHangouts(list);
+        } finally {
+          if (!cancelled) setLoadingHangouts(false);
+        }
+      })();
+      return () => { cancelled = true; };
+    }, []),
+  );
+
+  const handleDelete = (hangout: MyHangout) => {
+    Alert.alert(
+      'Delete this hangout?',
+      `"${hangout.title ?? 'Untitled hangout'}" will be deleted for everyone. This can't be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setDeletingId(hangout.id);
+            try {
+              await deleteHangout(hangout.id);
+              setMyHangouts(prev => prev.filter(h => h.id !== hangout.id));
+            } catch (e: any) {
+              Alert.alert('Could not delete', e.message ?? 'Please try again.');
+            } finally {
+              setDeletingId(null);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const handleCreate = async () => {
     setCreating(true);
@@ -109,6 +156,43 @@ export default function HangoutLandingScreen() {
           </Text>
 
           {error && <Text style={styles.errorText}>{error}</Text>}
+
+          {/* ── Your hangouts ── */}
+          {!loadingHangouts && myHangouts.length > 0 && (
+            <View style={styles.yourHangoutsSection}>
+              <Text style={styles.yourHangoutsTitle}>Your hangouts</Text>
+              {myHangouts.map(h => (
+                <TouchableOpacity
+                  key={h.id}
+                  style={styles.hangoutRow}
+                  onPress={() => router.push(`/hangout/${h.id}`)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.hangoutRowBody}>
+                    <Text style={styles.hangoutRowTitle} numberOfLines={1}>
+                      {h.title ?? 'Untitled hangout'}
+                    </Text>
+                    <Text style={styles.hangoutRowSub}>
+                      {h.status === 'decided' ? '🎉 Decided' : 'Voting'}
+                      {h.city_name ? `  ·  ${h.city_name}` : ''}
+                    </Text>
+                  </View>
+                  {h.is_creator && (
+                    <TouchableOpacity
+                      onPress={() => handleDelete(h)}
+                      disabled={deletingId === h.id}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      {deletingId === h.id
+                        ? <ActivityIndicator size="small" color={CORAL} />
+                        : <Text style={styles.hangoutRowDelete}>Delete</Text>
+                      }
+                    </TouchableOpacity>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           {/* ── Create section ── */}
           <View style={styles.section}>
@@ -249,6 +333,35 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 10,
   },
+
+  yourHangoutsSection: {
+    marginBottom: 24,
+    gap: 8,
+  },
+  yourHangoutsTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#8E8E93',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  hangoutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: '#F0F0F0',
+    gap: 10,
+  },
+  hangoutRowBody: { flex: 1 },
+  hangoutRowTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
+  hangoutRowSub: { fontSize: 12, color: '#8E8E93', marginTop: 2 },
+  hangoutRowDelete: { fontSize: 13, fontWeight: '600', color: CORAL },
 
   section: {
     backgroundColor: '#FAFAFA',

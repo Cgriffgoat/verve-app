@@ -250,11 +250,13 @@ export default function HangoutScreen() {
   const animMap = useRef<Map<string, AnimPair>>(new Map());
   const hasSyncedRef = useRef(false); // prevent repeat auto-syncs per screen visit
   const fetchAllRef = useRef<() => void>(() => {});
+  const hangoutStatusRef = useRef<string | undefined>(undefined);
 
   // Keep refs in sync with state / callbacks
   useEffect(() => { baseRef.current = baseActivities; }, [baseActivities]);
   useEffect(() => { displayedRef.current = displayedActivities; }, [displayedActivities]);
   useEffect(() => { allVotesRef.current = allVotes; }, [allVotes]);
+  useEffect(() => { hangoutStatusRef.current = hangout?.status; }, [hangout?.status]);
 
   // Auto-sync activities for the hangout location if none are found yet.
   // Uses a ref for fetchAll to avoid a circular dependency (fetchAll is declared below).
@@ -480,11 +482,18 @@ export default function HangoutScreen() {
         { event: 'UPDATE', schema: 'public', table: 'hangouts', filter: `id=eq.${id}` },
         async (payload) => {
           const updated = payload.new as Hangout;
+          // Only pop up for people who didn't just trigger this themselves —
+          // the person who tapped "lock it in" already got their own confirmation.
+          const justDecided = hangoutStatusRef.current !== 'decided' && updated.status === 'decided';
           setHangout(updated);
           if (updated.status === 'decided' && updated.selected_activity_id) {
             const { data: actRow } = await supabase
               .from('activities').select('*').eq('id', updated.selected_activity_id).single();
-            setSelectedActivity(actRow ? rowToActivity(actRow) : null);
+            const activity = actRow ? rowToActivity(actRow) : null;
+            setSelectedActivity(activity);
+            if (justDecided && activity) {
+              Alert.alert("You're going here! 🎉", activity.title);
+            }
           }
         })
       .on('postgres_changes',
@@ -763,6 +772,80 @@ export default function HangoutScreen() {
           )}
         </View>
 
+        {/* ── Group chat ── */}
+        <View style={styles.card}>
+          <View style={styles.cardTitleRow}>
+            <Text style={styles.cardTitle}>Group Chat</Text>
+            <View style={styles.liveDot} />
+            <Text style={styles.liveLabel}>Live</Text>
+          </View>
+
+          <ScrollView
+            ref={chatListRef}
+            style={styles.chatList}
+            contentContainerStyle={styles.chatListContent}
+            onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: true })}
+            onLayout={() => chatListRef.current?.scrollToEnd({ animated: false })}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+          >
+            {messages.filter(m => !blockedIds.has(m.user_id)).length === 0
+              ? <Text style={styles.chatEmptyText}>No messages yet. Say hi!</Text>
+              : messages.filter(m => !blockedIds.has(m.user_id)).map(item => {
+                  const isMe = item.user_id === currentUserId;
+                  const time = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  // Resolve the sender's CURRENT name from participants first — self-heals
+                  // messages sent before a good display name was known (e.g. "Friend").
+                  const liveName = participants.find(p => p.user_id === item.user_id)?.display_name;
+                  const senderName = liveName || item.display_name || 'Friend';
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[styles.chatBubbleWrap, isMe && styles.chatBubbleWrapMe]}
+                      activeOpacity={isMe ? 1 : 0.7}
+                      onLongPress={() => {
+                        if (isMe) return;
+                        setReportTarget({ id: item.id, userId: item.user_id, userName: senderName });
+                      }}
+                      delayLongPress={350}
+                    >
+                      <Text style={[styles.chatSenderName, isMe && styles.chatSenderNameMe]}>
+                        {isMe ? 'You' : senderName}
+                      </Text>
+                      <View style={[styles.chatBubble, isMe && styles.chatBubbleMe]}>
+                        <Text style={[styles.chatBubbleText, isMe && styles.chatBubbleTextMe]}>{item.content}</Text>
+                      </View>
+                      <Text style={[styles.chatTimestamp, isMe && styles.chatTimestampMe]}>{time}</Text>
+                    </TouchableOpacity>
+                  );
+                })
+            }
+          </ScrollView>
+
+          <View style={styles.chatInputRow}>
+            <TextInput
+              style={styles.chatInput}
+              value={chatText}
+              onChangeText={setChatText}
+              placeholder="Say something..."
+              placeholderTextColor="#8E8E93"
+              returnKeyType="send"
+              blurOnSubmit={false}
+              onSubmitEditing={handleSendMessage}
+              maxLength={1000}
+              editable={!sendingMessage}
+            />
+            <TouchableOpacity
+              style={[styles.chatSendBtn, (!chatText.trim() || sendingMessage) && styles.chatSendBtnDisabled]}
+              onPress={handleSendMessage}
+              disabled={!chatText.trim() || sendingMessage}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.chatSendBtnText}>Send</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* ── Decided banner ── */}
         {decided && selectedActivity && (
           <View style={styles.decidedBanner}>
@@ -889,76 +972,6 @@ export default function HangoutScreen() {
             <Text style={styles.emptyHintText}>No activities found near this location.</Text>
           </View>
         )}
-
-        {/* ── Group chat ── */}
-        <View style={styles.card}>
-          <View style={styles.cardTitleRow}>
-            <Text style={styles.cardTitle}>Group Chat</Text>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveLabel}>Live</Text>
-          </View>
-
-          <ScrollView
-            ref={chatListRef}
-            style={styles.chatList}
-            contentContainerStyle={styles.chatListContent}
-            onContentSizeChange={() => chatListRef.current?.scrollToEnd({ animated: true })}
-            onLayout={() => chatListRef.current?.scrollToEnd({ animated: false })}
-            showsVerticalScrollIndicator={false}
-            nestedScrollEnabled
-          >
-            {messages.filter(m => !blockedIds.has(m.user_id)).length === 0
-              ? <Text style={styles.chatEmptyText}>No messages yet. Say hi!</Text>
-              : messages.filter(m => !blockedIds.has(m.user_id)).map(item => {
-                  const isMe = item.user_id === currentUserId;
-                  const time = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  return (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[styles.chatBubbleWrap, isMe && styles.chatBubbleWrapMe]}
-                      activeOpacity={isMe ? 1 : 0.7}
-                      onLongPress={() => {
-                        if (isMe) return;
-                        setReportTarget({ id: item.id, userId: item.user_id, userName: item.display_name });
-                      }}
-                      delayLongPress={350}
-                    >
-                      <Text style={[styles.chatSenderName, isMe && styles.chatSenderNameMe]}>
-                        {isMe ? 'You' : item.display_name}
-                      </Text>
-                      <View style={[styles.chatBubble, isMe && styles.chatBubbleMe]}>
-                        <Text style={[styles.chatBubbleText, isMe && styles.chatBubbleTextMe]}>{item.content}</Text>
-                      </View>
-                      <Text style={[styles.chatTimestamp, isMe && styles.chatTimestampMe]}>{time}</Text>
-                    </TouchableOpacity>
-                  );
-                })
-            }
-          </ScrollView>
-
-          <View style={styles.chatInputRow}>
-            <TextInput
-              style={styles.chatInput}
-              value={chatText}
-              onChangeText={setChatText}
-              placeholder="Say something..."
-              placeholderTextColor="#8E8E93"
-              returnKeyType="send"
-              blurOnSubmit={false}
-              onSubmitEditing={handleSendMessage}
-              maxLength={1000}
-              editable={!sendingMessage}
-            />
-            <TouchableOpacity
-              style={[styles.chatSendBtn, (!chatText.trim() || sendingMessage) && styles.chatSendBtnDisabled]}
-              onPress={handleSendMessage}
-              disabled={!chatText.trim() || sendingMessage}
-              activeOpacity={0.75}
-            >
-              <Text style={styles.chatSendBtnText}>Send</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
 
       </ScrollView>
     </SafeAreaView>
